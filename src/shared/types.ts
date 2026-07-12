@@ -1095,6 +1095,8 @@ export type WorkspaceSessionState = {
   defaultTerminalTabsAppliedByWorktreeId?: Record<string, true>
   /** Provider-session resume records captured when workspaces sleep. */
   sleepingAgentSessionsByPaneKey?: Record<string, SleepingAgentSessionRecord>
+  /** Spatial Canvas documents keyed by workspace identity. */
+  canvasDocumentsByWorkspaceKey?: Record<string, import('./canvas-types').CanvasDocument>
 }
 
 export type WorkspaceSessionPatch = Partial<WorkspaceSessionState>

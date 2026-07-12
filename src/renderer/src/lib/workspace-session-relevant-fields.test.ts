@@ -32,7 +32,8 @@ describe('SESSION_RELEVANT_FIELDS', () => {
     lastKnownRelayPtyIdByTabId: true,
     lastVisitedAtByWorktreeId: true,
     defaultTerminalTabsAppliedByWorktreeId: true,
-    sleepingAgentSessionsByPaneKey: true
+    sleepingAgentSessionsByPaneKey: true,
+    canvasDocumentsByWorkspaceKey: true
   }
 
   it('contains every key of WorkspaceSessionSnapshot', () => {

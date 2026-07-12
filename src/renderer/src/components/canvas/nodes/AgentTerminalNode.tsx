@@ -1,18 +1,14 @@
-import React, { useEffect, useRef, useCallback, useState } from 'react'
+import React, { useEffect, useRef, useCallback } from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
-import {
-  ensureHiddenContainer,
-  removeHiddenContainer,
-  registerPortalTarget,
-  unregisterPortalTarget,
-  updateHiddenContainerSize,
-} from '../terminal-portal-registry'
+import { getCanvasPortalTargets, setCanvasPortalTargets } from '../canvas-terminal-portal'
+import type { CanvasResourceReference } from '../../../../../shared/canvas-types'
 
 type AgentTerminalNodeType = Node<
   {
     label: string
     paneKey?: string
+    resourceRef?: CanvasResourceReference
     provider?: string
     agentStatus?: 'working' | 'blocked' | 'waiting' | 'done' | 'idle' | 'disconnected'
     sessionId?: string
@@ -51,43 +47,35 @@ const statusLabels: Record<string, string> = {
 export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
   React.memo(({ data, selected }) => {
     const portalRef = useRef<HTMLDivElement>(null)
-    const [, setDimensions] = useState({ width: 0, height: 0 })
-    const paneKey = data.paneKey
+    const resourceRef = data.resourceRef
+    const paneKey =
+      data.paneKey ??
+      (resourceRef?.kind === 'agent-pane'
+        ? resourceRef.paneKey ?? `${resourceRef.tabId}:${resourceRef.leafId ?? ''}`.replace(/:$/, '')
+        : resourceRef?.kind === 'agent-terminal'
+          ? resourceRef.paneKey
+          : undefined)
+    const tabId = resourceRef?.kind === 'agent-pane' ? resourceRef.tabId : paneKey?.split(':')[0]
+    const worktreeId = resourceRef?.kind === 'agent-pane' ? resourceRef.worktreeId : ''
     const statusColor = statusColors[data.agentStatus ?? 'idle'] ?? statusColors.idle
     const statusLabel = statusLabels[data.agentStatus ?? 'idle'] ?? 'Unknown'
 
     // Register portal target on mount
     useEffect(() => {
-      if (!paneKey) return
-      ensureHiddenContainer(paneKey)
-      if (portalRef.current) {
-        registerPortalTarget(paneKey, portalRef.current)
-      }
+      if (!paneKey || !tabId || !portalRef.current) return
+      const target = portalRef.current
+      const existing = getCanvasPortalTargets()
+      setCanvasPortalTargets([
+        ...existing.filter((entry) => entry.paneKey !== paneKey),
+        { paneKey, tabId, worktreeId, target, active: true }
+      ])
       return () => {
-        unregisterPortalTarget(paneKey)
-        removeHiddenContainer(paneKey)
+        setCanvasPortalTargets(getCanvasPortalTargets().filter((entry) => entry.paneKey !== paneKey))
       }
-    }, [paneKey])
-
-    // ResizeObserver for dimension propagation
-    useEffect(() => {
-      if (!portalRef.current || !paneKey) return
-      const observer = new ResizeObserver((entries) => {
-        for (const entry of entries) {
-          const { width, height } = entry.contentRect
-          if (width > 0 && height > 0) {
-            setDimensions({ width, height })
-            updateHiddenContainerSize(paneKey, width, height)
-          }
-        }
-      })
-      observer.observe(portalRef.current)
-      return () => observer.disconnect()
-    }, [paneKey])
+    }, [paneKey, tabId, worktreeId])
 
     const handleFocus = useCallback(() => {
-      const target = document.getElementById(`term-${paneKey}-focus-target`)
-      target?.focus()
+      portalRef.current?.querySelector<HTMLElement>('.xterm-helper-textarea')?.focus()
     }, [paneKey])
 
     return (

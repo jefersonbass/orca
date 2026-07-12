@@ -1,19 +1,14 @@
-import React, { useEffect, useRef, useCallback, useState } from 'react'
+import React, { useEffect, useRef, useCallback } from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
-import {
-  ensureHiddenContainer,
-  removeHiddenContainer,
-  registerPortalTarget,
-  unregisterPortalTarget,
-  updateHiddenContainerSize,
-} from '../terminal-portal-registry'
 import { setCanvasPortalTargets, getCanvasPortalTargets } from '../canvas-terminal-portal'
+import type { CanvasResourceReference } from '../../../../../shared/canvas-types'
 
 type LiveTerminalNodeType = Node<
   {
     label: string
     paneKey?: string
+    resourceRef?: CanvasResourceReference
     sessionId?: string
     status?: 'connected' | 'disconnected' | 'connecting' | 'error'
   },
@@ -37,8 +32,15 @@ type LiveTerminalNodeType = Node<
 export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
   React.memo(({ data, selected }) => {
     const portalRef = useRef<HTMLDivElement>(null)
-    const [, setDimensions] = useState({ width: 0, height: 0 })
-    const paneKey = data.paneKey
+    const resourceRef = data.resourceRef
+    const paneKey =
+      data.paneKey ??
+      (resourceRef?.kind === 'live-terminal' ? resourceRef.paneKey : undefined)
+    const tabId =
+      resourceRef?.kind === 'terminal-tab'
+        ? resourceRef.tabId
+        : paneKey?.split(':')[0]
+    const worktreeId = resourceRef?.kind === 'terminal-tab' ? resourceRef.worktreeId : ''
     const statusColor =
       data.status === 'connected'
         ? '#22c55e'
@@ -50,48 +52,21 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
 
     // Register portal target on mount, unregister on unmount
     useEffect(() => {
-      if (!paneKey) return
-
-      // Ensure hidden container exists for resize propagation
-      ensureHiddenContainer(paneKey)
-
-      // Register portal target
-      if (portalRef.current) {
-        registerPortalTarget(paneKey, portalRef.current)
-        // Also publish to the Canvas portal target module for Terminal.tsx consumption
+      if (!paneKey || !tabId || !portalRef.current) return
+      const target = portalRef.current
+      {
         const existing = getCanvasPortalTargets()
         setCanvasPortalTargets([
-          ...existing,
-          { paneKey, tabId: paneKey.split(':')[0], worktreeId: '', target: portalRef.current, active: true },
+          ...existing.filter((entry) => entry.paneKey !== paneKey),
+          { paneKey, tabId, worktreeId, target, active: true },
         ])
       }
 
       return () => {
-        unregisterPortalTarget(paneKey)
-        removeHiddenContainer(paneKey)
-        // Remove this target from Canvas portal registry
         const remaining = getCanvasPortalTargets().filter((t) => t.paneKey !== paneKey)
         setCanvasPortalTargets(remaining)
       }
-    }, [paneKey])
-
-    // ResizeObserver to propagate Canvas node dimensions to hidden host
-    useEffect(() => {
-      if (!portalRef.current || !paneKey) return
-
-      const observer = new ResizeObserver((entries) => {
-        for (const entry of entries) {
-          const { width, height } = entry.contentRect
-          if (width > 0 && height > 0) {
-            setDimensions({ width, height })
-            updateHiddenContainerSize(paneKey, width, height)
-          }
-        }
-      })
-
-      observer.observe(portalRef.current)
-      return () => observer.disconnect()
-    }, [paneKey])
+    }, [paneKey, tabId, worktreeId])
 
     // Keyboard focus handler — focus the terminal on click
     const handleFocus = useCallback(() => {
@@ -99,10 +74,7 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
       // Why: relay focus to the PaneManager's xterm textarea.
       // The hidden host owns the actual xterm instance; we need
       // to focus its textarea when the Canvas node is clicked.
-      const hiddenContainer = document.getElementById(
-        `term-${paneKey}-focus-target`
-      )
-      hiddenContainer?.focus()
+      portalRef.current?.querySelector<HTMLElement>('.xterm-helper-textarea')?.focus()
     }, [paneKey])
 
     return (

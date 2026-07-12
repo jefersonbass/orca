@@ -69,7 +69,8 @@ const FIELD_OWNERSHIP = {
   remoteSessionIdsByTabId: 'tabKeyed',
   browserPagesByWorkspace: 'browserWorkspaceKeyed',
   markdownFrontmatterVisible: 'fileKeyed',
-  sleepingAgentSessionsByPaneKey: 'sleepingAgentKeyed'
+  sleepingAgentSessionsByPaneKey: 'sleepingAgentKeyed',
+  canvasDocumentsByWorkspaceKey: 'worktreeKeyed'
 } as const satisfies Record<keyof WorkspaceSessionState, FieldOwnership>
 
 // Why: a new WorkspaceSessionState field must be classified above or the split

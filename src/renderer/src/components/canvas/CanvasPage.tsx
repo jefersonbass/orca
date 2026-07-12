@@ -1,12 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { CanvasToolbar } from './CanvasToolbar'
 import { CanvasEmptyState } from './CanvasEmptyState'
-import { TerminalHost } from './TerminalHost'
-import { CanvasPortalRenderer } from './CanvasPortalRenderer'
 import { KnowledgeArtifactDialog } from './KnowledgeArtifactDialog'
 import { useAppStore } from '@/store'
 
-const STORAGE_KEY = 'orca-canvas-document'
+const LEGACY_STORAGE_KEY = 'orca-canvas-document'
 
 // Lazy-load React Flow surface to avoid eager bundle loading
 const CanvasSurface = React.lazy(() =>
@@ -14,17 +12,9 @@ const CanvasSurface = React.lazy(() =>
 )
 
 // Simple debounced save to localStorage (works across page navigations and reloads)
-function saveToDisk(doc: unknown): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(doc))
-  } catch {
-    // localStorage may be full; fail silently
-  }
-}
-
 function loadFromDisk<T>(): T | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY)
     if (!raw) return null
     return JSON.parse(raw) as T
   } catch {
@@ -35,32 +25,25 @@ function loadFromDisk<T>(): T | null {
 const CanvasPageInner: React.FC = () => {
   const storeCanvasDocument = useAppStore((s) => s.canvasDocument)
   const setCanvasDocument = useAppStore((s) => s.setCanvasDocument)
+  const activateCanvasWorkspace = useAppStore((s) => s.activateCanvasWorkspace)
+  const activeWorkspaceKey = useAppStore((s) => s.activeWorkspaceKey)
+  const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
+  const activeRepoId = useAppStore((s) => s.activeRepoId)
   const undoStack = useAppStore((s) => s.undoStack)
   const reactFlowRef = useRef<any>(null)
   const [rfReady, setRfReady] = useState(false)
   const [drawingMode, setDrawingMode] = useState(false)
   const nodeCount = storeCanvasDocument?.nodes?.length ?? 0
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Persistence ──
   useEffect(() => {
+    activateCanvasWorkspace()
     const saved = loadFromDisk<typeof storeCanvasDocument>()
-    if (saved) setCanvasDocument(saved)
-  }, [setCanvasDocument])
-
-  useEffect(() => {
-    if (!storeCanvasDocument) return
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => saveToDisk(storeCanvasDocument), 1000)
-    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
-  }, [storeCanvasDocument])
-
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-      if (storeCanvasDocument) saveToDisk(storeCanvasDocument)
+    if (saved) {
+      setCanvasDocument(saved)
+      localStorage.removeItem(LEGACY_STORAGE_KEY)
     }
-  }, [storeCanvasDocument])
+  }, [activateCanvasWorkspace, activeRepoId, activeWorkspaceKey, activeWorktreeId, setCanvasDocument])
 
   const syncDoc = useCallback(
     (updater: (doc: NonNullable<typeof storeCanvasDocument>) => typeof storeCanvasDocument) => {
@@ -82,13 +65,10 @@ const CanvasPageInner: React.FC = () => {
   }, [])
 
   // ── Viewport (throttled) ──
-  const viewportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleViewportChange = useCallback(
     (viewport: { x: number; y: number; zoom: number }) => {
       if (!storeCanvasDocument) return
       setCanvasDocument({ ...storeCanvasDocument, viewport })
-      if (viewportTimerRef.current) clearTimeout(viewportTimerRef.current)
-      viewportTimerRef.current = setTimeout(() => saveToDisk(storeCanvasDocument), 500)
     },
     [storeCanvasDocument, setCanvasDocument]
   )
@@ -322,8 +302,6 @@ const CanvasPageInner: React.FC = () => {
         onExportPng={handleExportPng}
       />
 
-      <TerminalHost />
-      <CanvasPortalRenderer />
 
       {/* Context menus */}
       {nodeCtx && (

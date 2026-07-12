@@ -443,6 +443,7 @@ function App(): React.JSX.Element {
       hydrateTabsSession: s.hydrateTabsSession,
       hydrateEditorSession: s.hydrateEditorSession,
       hydrateBrowserSession: s.hydrateBrowserSession,
+      hydrateCanvasSession: s.hydrateCanvasSession,
       fetchBrowserSessionProfiles: s.fetchBrowserSessionProfiles,
       reconnectPersistedTerminals: s.reconnectPersistedTerminals,
       setDeferredSshReconnectTargets: s.setDeferredSshReconnectTargets,
@@ -974,6 +975,7 @@ function App(): React.JSX.Element {
             actions.hydrateTabsSession(sessionRead.session, sessionHydrationOptions)
             actions.hydrateEditorSession(sessionRead.session, sessionHydrationOptions)
             actions.hydrateBrowserSession(sessionRead.session, sessionHydrationOptions)
+            actions.hydrateCanvasSession(sessionRead.session)
           })
           // Why: prune lastVisitedAtByWorktreeId entries whose worktrees
           // no longer exist. Must run AFTER hydration — before this point,

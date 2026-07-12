@@ -9,6 +9,7 @@
  * and wrong shapes all collapse to "use defaults" — never throw into main.
  */
 import { z } from 'zod'
+import { canvasDocumentSchema } from './canvas-schema'
 import type {
   BrowserWorkspace,
   TabGroupLayoutNode,
@@ -295,7 +296,8 @@ export const workspaceSessionStateSchema: z.ZodType<WorkspaceSessionState> = z.o
     )
     .optional(),
   defaultTerminalTabsAppliedByWorktreeId: z.record(z.string(), z.literal(true)).optional(),
-  sleepingAgentSessionsByPaneKey: sleepingAgentSessionsByPaneKeySchema
+  sleepingAgentSessionsByPaneKey: sleepingAgentSessionsByPaneKeySchema,
+  canvasDocumentsByWorkspaceKey: z.record(z.string(), canvasDocumentSchema).optional()
 })
 
 export type ParsedWorkspaceSession =

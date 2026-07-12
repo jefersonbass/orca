@@ -332,8 +332,11 @@ function Terminal(): React.JSX.Element | null {
     for (const portal of activityTerminalPortals) {
       ids.add(portal.tabId)
     }
+    for (const portal of canvasTerminalPortals) {
+      ids.add(portal.tabId)
+    }
     return Array.from(ids)
-  }, [activeTabId, activeTabType, activeView, activityTerminalPortals])
+  }, [activeTabId, activeTabType, activeView, activityTerminalPortals, canvasTerminalPortals])
 
   useEffect(() => {
     // Why: hibernation must treat terminals portaled into foreground surfaces
@@ -861,7 +864,10 @@ function Terminal(): React.JSX.Element | null {
 
     const nowMs = Date.now()
     const overrides = getTerminalParkingPolicyOverrides()
-    const portalWorktreeIds = new Set(activityTerminalPortals.map((portal) => portal.worktreeId))
+    const portalWorktreeIds = new Set([
+      ...activityTerminalPortals.map((portal) => portal.worktreeId),
+      ...canvasTerminalPortals.map((portal) => portal.worktreeId)
+    ])
     const currentWorktreeIds = new Set(workspaceSurfaces.map((workspace) => workspace.id))
     for (const worktreeId of Array.from(terminalWorktreeHiddenSinceRef.current.keys())) {
       if (!currentWorktreeIds.has(worktreeId) || !mountedWorktreeIdsRef.current.has(worktreeId)) {
@@ -946,6 +952,7 @@ function Terminal(): React.JSX.Element | null {
   }, [
     activeView,
     activityTerminalPortals,
+    canvasTerminalPortals,
     backgroundMountRevision,
     pendingStartupByTabId,
     renderedActiveWorktreeId,

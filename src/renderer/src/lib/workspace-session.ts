@@ -61,6 +61,7 @@ export type WorkspaceSessionSnapshot = Pick<
   | 'defaultTerminalTabsAppliedByWorktreeId'
 > & {
   sleepingAgentSessionsByPaneKey?: AppState['sleepingAgentSessionsByPaneKey']
+  canvasDocumentsByWorkspaceKey?: AppState['canvasDocumentsByWorkspaceKey']
 }
 
 // Why: the App-level Zustand subscriber that debounces session writes uses
@@ -97,6 +98,7 @@ export const SESSION_RELEVANT_FIELDS = [
   'lastKnownRelayPtyIdByTabId',
   'lastVisitedAtByWorktreeId',
   'defaultTerminalTabsAppliedByWorktreeId',
+  'canvasDocumentsByWorkspaceKey',
   'sleepingAgentSessionsByPaneKey'
 ] as const satisfies readonly (keyof WorkspaceSessionSnapshot)[]
 
@@ -389,6 +391,10 @@ export function buildWorkspaceSessionPayload(
       snapshot.defaultTerminalTabsAppliedByWorktreeId &&
       Object.keys(snapshot.defaultTerminalTabsAppliedByWorktreeId).length > 0
         ? snapshot.defaultTerminalTabsAppliedByWorktreeId
+        : undefined,
+    canvasDocumentsByWorkspaceKey:
+      Object.keys(snapshot.canvasDocumentsByWorkspaceKey ?? {}).length > 0
+        ? snapshot.canvasDocumentsByWorkspaceKey
         : undefined,
     ...buildSleepingAgentSessionData(snapshot)
   }
