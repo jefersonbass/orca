@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
-import { bindingStore } from './canvas-binding-store'
-
-type BindingKind = 'context' | 'delegation' | 'output' | 'reporting'
+import { useAppStore } from '@/store'
+import { allowedBindingKinds, createOperationalBinding, type BindingKind } from './canvas-operational-graph'
+import type { CanvasNodeType } from '../../../../shared/canvas-types'
 
 interface OperatonalBindingDialogProps {
   sourceNodeId: string
@@ -25,6 +25,7 @@ export const OperationalBindingDialog: React.FC<OperatonalBindingDialogProps> = 
   const [contextMode, setContextMode] = useState<string>('full-content')
   const [approvalMode, setApprovalMode] = useState<string>('always-review')
   const [error, setError] = useState<string | null>(null)
+  const addCanvasBinding = useAppStore((state) => state.addCanvasBinding)
 
   const validCombinations: Array<{ kind: BindingKind; label: string; from: string; to: string }> = [
     { kind: 'context', label: 'Context', from: 'note,file,task,diff', to: 'agent' },
@@ -33,13 +34,8 @@ export const OperationalBindingDialog: React.FC<OperatonalBindingDialogProps> = 
     { kind: 'reporting', label: 'Reporting', from: 'agent', to: 'agent' },
   ]
 
-  const isValid = (k: BindingKind): boolean => {
-    const combo = validCombinations.find((c) => c.kind === k)
-    if (!combo) return false
-    const fromOk = combo.from.split(',').includes(sourceType)
-    const toOk = combo.to.split(',').includes(targetType)
-    return fromOk && toOk
-  }
+  const isValid = (k: BindingKind): boolean =>
+    allowedBindingKinds(sourceType as CanvasNodeType, targetType as CanvasNodeType).includes(k)
 
   const handleCreate = () => {
     if (!kind) return
@@ -48,20 +44,7 @@ export const OperationalBindingDialog: React.FC<OperatonalBindingDialogProps> = 
       return
     }
     try {
-      switch (kind) {
-        case 'context':
-          bindingStore.createContextBinding(sourceNodeId, targetNodeId, contextMode as any)
-          break
-        case 'delegation':
-          bindingStore.createDelegationBinding(sourceNodeId, targetNodeId)
-          break
-        case 'output':
-          bindingStore.createOutputBinding(sourceNodeId, targetNodeId, 'append-progress', approvalMode as any)
-          break
-        case 'reporting':
-          bindingStore.createReportingBinding(sourceNodeId, targetNodeId)
-          break
-      }
+      addCanvasBinding(createOperationalBinding({ kind, sourceNodeId, targetNodeId, contextMode: contextMode as 'full-content', approvalMode: approvalMode as 'always-review' }))
       onCreated()
     } catch (e) {
       setError(String(e))

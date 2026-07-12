@@ -1,14 +1,24 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
+import { useAppStore } from '@/store'
 
 type NoteNodeType = Node<{ label: string; content?: string; color?: string }, 'note'>
 
 export const NoteNode: React.FC<NodeProps<NoteNodeType>> = React.memo(
-  ({ data, selected }) => {
+  ({ id, data, selected }) => {
     const [editing, setEditing] = useState(false)
     const [content, setContent] = useState(data.content ?? '')
     const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const setCanvasDocument = useAppStore((state) => state.setCanvasDocument)
+
+    const persistContent = useCallback(() => {
+      const document = useAppStore.getState().canvasDocument
+      if (!document) return
+      setCanvasDocument({ ...document, nodes: document.nodes.map((node) =>
+        node.id === id ? { ...node, metadata: { ...node.metadata, content } } : node
+      ) })
+    }, [content, id, setCanvasDocument])
 
     useEffect(() => {
       if (editing && textareaRef.current) {
@@ -19,17 +29,17 @@ export const NoteNode: React.FC<NodeProps<NoteNodeType>> = React.memo(
     const handleDoubleClick = useCallback(() => setEditing(true), [])
     const handleBlur = useCallback(() => {
       setEditing(false)
-      data.content = content
-    }, [content, data])
+      persistContent()
+    }, [persistContent])
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent) => {
         if (e.key === 'Escape') {
           setEditing(false)
-          data.content = content
+          persistContent()
         }
       },
-      [content, data]
+      [persistContent]
     )
 
     return (

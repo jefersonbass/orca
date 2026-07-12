@@ -2,6 +2,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { CanvasToolbar } from './CanvasToolbar'
 import { CanvasEmptyState } from './CanvasEmptyState'
 import { KnowledgeArtifactDialog } from './KnowledgeArtifactDialog'
+import { OperationalBindingDialog } from './OperationalBindingDialog'
+import { BindingInspector } from './BindingInspector'
+import { CanvasOrchestrationPanel } from './CanvasOrchestrationPanel'
+import { allowedBindingKinds } from './canvas-operational-graph'
 import { useAppStore } from '@/store'
 
 const LEGACY_STORAGE_KEY = 'orca-canvas-document'
@@ -110,6 +114,22 @@ const CanvasPageInner: React.FC = () => {
   const [nodeCtx, setNodeCtx] = useState<{ nodeId: string; x: number; y: number } | null>(null)
   const [edgeCtx, setEdgeCtx] = useState<{ edgeId: string; x: number; y: number } | null>(null)
   const [showSendToNote, setShowSendToNote] = useState(false)
+  const [showBindingInspector, setShowBindingInspector] = useState(false)
+  const [showOrchestration, setShowOrchestration] = useState(false)
+  const [bindingDraft, setBindingDraft] = useState<{
+    sourceNodeId: string; targetNodeId: string; sourceType: string; targetType: string
+  } | null>(null)
+
+  const handleCreateOperationalBinding = useCallback(() => {
+    if (!edgeCtx || !storeCanvasDocument) return
+    const edge = storeCanvasDocument.edges.find((item) => item.id === edgeCtx.edgeId)
+    if (!edge) return
+    const source = storeCanvasDocument.nodes.find((node) => node.id === edge.sourceNodeId)
+    const target = storeCanvasDocument.nodes.find((node) => node.id === edge.targetNodeId)
+    if (!source || !target || allowedBindingKinds(source.type, target.type).length === 0) return
+    setBindingDraft({ sourceNodeId: source.id, targetNodeId: target.id, sourceType: source.type, targetType: target.type })
+    setEdgeCtx(null)
+  }, [edgeCtx, storeCanvasDocument])
 
   // ── Edge creation ──
   const handleEdgeCreated = useCallback(
@@ -319,6 +339,11 @@ const CanvasPageInner: React.FC = () => {
           >📝 Send to Note</button>
           <div className="border-t border-worktree-sidebar-border" />
           <button
+            onClick={handleCreateOperationalBinding}
+            className="flex w-full items-center px-3 py-1.5 text-left text-[13px] text-blue-400 transition-colors hover:bg-blue-500/10"
+            role="menuitem"
+          >Create Operational Binding</button>
+          <button
             onClick={handleDeleteNode}
             className="flex w-full items-center px-3 py-1.5 text-left text-[13px] text-red-400 transition-colors hover:bg-red-500/10"
             role="menuitem"
@@ -401,6 +426,32 @@ const CanvasPageInner: React.FC = () => {
           onAppend={() => { setShowSendToNote(false) }}
           onCreateNote={() => { setShowSendToNote(false) }}
           onClose={() => setShowSendToNote(false)}
+        />
+      )}
+      <button
+        type="button"
+        onClick={() => setShowBindingInspector((value) => !value)}
+        className="fixed right-4 bottom-4 z-40 rounded-lg border border-worktree-sidebar-border bg-worktree-sidebar px-3 py-2 text-xs text-worktree-sidebar-foreground shadow-lg"
+      >Bindings</button>
+      <button type="button" onClick={() => setShowOrchestration((value) => !value)}
+        className="fixed right-28 bottom-4 z-40 rounded-lg border border-worktree-sidebar-border bg-worktree-sidebar px-3 py-2 text-xs text-worktree-sidebar-foreground shadow-lg">
+        Orchestrate
+      </button>
+      {showBindingInspector && (
+        <div className="fixed right-4 bottom-14 z-40 h-[420px] w-[340px] rounded-xl border border-worktree-sidebar-border bg-worktree-sidebar shadow-2xl">
+          <BindingInspector />
+        </div>
+      )}
+      {showOrchestration && (
+        <div className="fixed right-4 top-20 z-40 h-[620px] w-[420px] rounded-xl border border-worktree-sidebar-border bg-worktree-sidebar shadow-2xl">
+          <CanvasOrchestrationPanel />
+        </div>
+      )}
+      {bindingDraft && (
+        <OperationalBindingDialog
+          {...bindingDraft}
+          onClose={() => setBindingDraft(null)}
+          onCreated={() => { setBindingDraft(null); setShowBindingInspector(true) }}
         />
       )}
     </div>

@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react'
+import React, { useCallback, useEffect } from 'react'
 import {
   ReactFlow,
   Controls,
@@ -6,6 +6,7 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
+  applyNodeChanges,
   type Node,
   type Edge,
   type BackgroundVariant,
@@ -33,6 +34,7 @@ import { SemanticEdge } from './SemanticEdge'
 import { VisualEdge } from './VisualEdge'
 import { ArrowEdge } from './ArrowEdge'
 import type { CanvasNodeDocument, CanvasEdgeDocument } from '../../../../shared/canvas-types'
+import { useAppStore } from '@/store'
 
 // ── Node type registry ──
 interface NodeContextMenuEvent {
@@ -117,7 +119,7 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     id: docNode.id,
     type: docNode.type,
     position: docNode.position,
-    data: { ...docNode } as any,
+    data: { ...docNode, ...docNode.metadata } as any,
     selected: false,
   }))
 
@@ -130,10 +132,40 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     data: { relationship: e.relationship, comment: e.comment },
   }))
 
-  const [flowNodes, , onNodesChangeHandler] = useNodesState<Node>(initialNodes)
+  const [flowNodes, setFlowNodes] = useNodesState<Node>(initialNodes)
   const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const onNodesChangeAny = onNodesChangeHandler as any
+  useEffect(() => {
+    setFlowNodes(canvasDocumentNodes.map((docNode) => ({
+      id: docNode.id, type: docNode.type, position: docNode.position,
+      data: { ...docNode, ...docNode.metadata } as any, selected: false
+    })))
+  }, [canvasDocumentNodes, setFlowNodes])
+
+  const onNodesChangeAny = useCallback((changes: any[]) => {
+    setFlowNodes((current) => {
+      const next = applyNodeChanges(changes, current)
+      const document = useAppStore.getState().canvasDocument
+      if (document && changes.some((change) => change.type === 'position' || change.type === 'dimensions')) {
+        useAppStore.getState().setCanvasDocument({
+          ...document,
+          nodes: document.nodes.map((node) => {
+            const flowNode = next.find((candidate) => candidate.id === node.id)
+            if (!flowNode) return node
+            const measured = flowNode.measured
+            return {
+              ...node,
+              position: flowNode.position,
+              size: measured?.width && measured?.height
+                ? { width: measured.width, height: measured.height }
+                : node.size
+            }
+          })
+        })
+      }
+      return next
+    })
+  }, [setFlowNodes])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const onEdgesChangeAny = onEdgesChange as any
 

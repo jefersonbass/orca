@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { CanvasDocument } from './canvas-types'
+import type { CanvasWorkspaceOrchestration } from './canvas-agent-types'
 
 const pointSchema = z.object({ x: z.number().finite(), y: z.number().finite() })
 const sizeSchema = z.object({
@@ -46,4 +47,33 @@ export const canvasDocumentSchema: z.ZodType<CanvasDocument> = z.object({
     createdBy: z.enum(['user', 'agent', 'system']).optional(), timestamp: z.string().optional(),
     worktreeId: z.string().optional(), comment: z.string().optional()
   }))
+})
+
+const bindingBase = { id: z.string(), enabled: z.boolean(), createdAt: z.string() }
+const operationalBindingSchema = z.discriminatedUnion('kind', [
+  z.object({ ...bindingBase, kind: z.literal('context'), sourceNodeId: z.string(), targetAgentNodeId: z.string(), contextMode: z.enum(['full-content', 'selected-section', 'summary', 'reference-only']), lastContentHash: z.string().optional() }),
+  z.object({ ...bindingBase, kind: z.literal('delegation'), sourceAgentNodeId: z.string(), targetAgentNodeId: z.string(), permission: z.enum(['propose-task', 'assign-task', 'request-review', 'request-fix']), requiresUserApproval: z.boolean() }),
+  z.object({ ...bindingBase, kind: z.literal('output'), sourceAgentNodeId: z.string(), targetNoteNodeId: z.string(), outputMode: z.enum(['append-progress', 'append-decisions', 'append-errors', 'append-summary', 'replace-agent-owned-section']), approvalMode: z.enum(['always-review', 'auto-append-agent-section']) }),
+  z.object({ ...bindingBase, kind: z.literal('reporting'), sourceAgentNodeId: z.string(), targetAgentNodeId: z.string(), reportMode: z.enum(['status', 'result', 'blocked', 'review-result']) })
+])
+const messageSchema = z.object({
+  id: z.string(), fromAgentId: z.string().optional(), toAgentId: z.string(), taskId: z.string().optional(),
+  type: z.enum(['instruction', 'delegation', 'review-request', 'fix-request', 'status', 'blocked', 'result', 'question']),
+  content: z.string(), contextRefs: z.array(z.object({ nodeId: z.string(), resourceType: z.string(), snapshotHash: z.string().optional() })),
+  createdAt: z.string(), deliveryState: z.enum(['draft', 'awaiting-approval', 'queued', 'delivering', 'delivered', 'acknowledged', 'failed', 'cancelled']),
+  deliveryError: z.string().optional(), providerReceipt: z.string().optional(), deliveredAt: z.string().optional()
+})
+const taskSchema = z.object({
+  id: z.string(), title: z.string(), description: z.string(), createdBy: z.enum(['user', 'lead-agent']), assignedAgentId: z.string().optional(),
+  parentTaskId: z.string().optional(), worktreeId: z.string().optional(), contextBindingIds: z.array(z.string()), outputBindingIds: z.array(z.string()),
+  state: z.enum(['draft', 'awaiting-approval', 'ready', 'assigned', 'running', 'waiting-for-input', 'blocked', 'completed', 'failed', 'cancelled', 'interrupted']),
+  resultSummary: z.string().optional(), createdAt: z.string(), updatedAt: z.string()
+})
+const sessionSchema = z.object({
+  id: z.string(), leadAgentNodeId: z.string(), subordinateAgentNodeIds: z.array(z.string()), tasks: z.array(taskSchema), messages: z.array(messageSchema),
+  state: z.enum(['draft', 'awaiting-approval', 'active', 'paused', 'blocked', 'completed', 'failed', 'cancelled', 'interrupted']), createdAt: z.string(), updatedAt: z.string()
+})
+
+export const canvasWorkspaceOrchestrationSchema: z.ZodType<CanvasWorkspaceOrchestration> = z.object({
+  bindings: z.array(operationalBindingSchema), messages: z.array(messageSchema), tasks: z.array(taskSchema), sessions: z.array(sessionSchema)
 })

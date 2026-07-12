@@ -68,7 +68,7 @@ export type CanvasOperationalBinding = ContextBinding | DelegationBinding | Outp
 // ── Agent Messages ──
 
 export type AgentMessageType = 'instruction' | 'delegation' | 'review-request' | 'fix-request' | 'status' | 'blocked' | 'result' | 'question'
-export type MessageDeliveryState = 'draft' | 'awaiting-approval' | 'queued' | 'delivered' | 'acknowledged' | 'failed'
+export type MessageDeliveryState = 'draft' | 'awaiting-approval' | 'queued' | 'delivering' | 'delivered' | 'acknowledged' | 'failed' | 'cancelled'
 
 export type AgentCanvasMessage = {
   id: string
@@ -80,11 +80,14 @@ export type AgentCanvasMessage = {
   contextRefs: Array<{ nodeId: string; resourceType: string; snapshotHash?: string }>
   createdAt: string
   deliveryState: MessageDeliveryState
+  deliveryError?: string
+  providerReceipt?: string
+  deliveredAt?: string
 }
 
 // ── Agent Tasks ──
 
-export type CanvasAgentTaskState = 'draft' | 'awaiting-approval' | 'ready' | 'assigned' | 'running' | 'waiting-for-input' | 'blocked' | 'completed' | 'failed' | 'cancelled'
+export type CanvasAgentTaskState = 'draft' | 'awaiting-approval' | 'ready' | 'assigned' | 'running' | 'waiting-for-input' | 'blocked' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
 
 export type CanvasAgentTask = {
   id: string
@@ -104,7 +107,7 @@ export type CanvasAgentTask = {
 
 // ── Collaboration Session ──
 
-export type CollaborationSessionState = 'draft' | 'active' | 'paused' | 'completed' | 'cancelled'
+export type CollaborationSessionState = 'draft' | 'awaiting-approval' | 'active' | 'paused' | 'blocked' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
 
 export type CollaborationSession = {
   id: string
@@ -115,4 +118,11 @@ export type CollaborationSession = {
   state: CollaborationSessionState
   createdAt: string
   updatedAt: string
+}
+
+export type CanvasWorkspaceOrchestration = {
+  bindings: CanvasOperationalBinding[]
+  messages: AgentCanvasMessage[]
+  tasks: CanvasAgentTask[]
+  sessions: CollaborationSession[]
 }

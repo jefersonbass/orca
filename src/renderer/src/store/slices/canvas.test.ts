@@ -58,4 +58,17 @@ describe('CanvasSlice workspace ownership', () => {
     })
     expect(invalidSession.ok).toBe(false)
   })
+
+  it('isolates executable bindings and messages with the workspace', () => {
+    const store = createTestStore()
+    store.setState({ activeWorktreeId: 'workspace-a', activeWorkspaceKey: worktreeWorkspaceKey('workspace-a') })
+    store.getState().activateCanvasWorkspace()
+    store.getState().addCanvasBinding({ id: 'ctx-a', kind: 'context', sourceNodeId: 'note-a', targetAgentNodeId: 'agent-a', contextMode: 'full-content', enabled: true, createdAt: new Date(0).toISOString() })
+    store.setState({ activeWorktreeId: 'workspace-b', activeWorkspaceKey: worktreeWorkspaceKey('workspace-b') })
+    store.getState().activateCanvasWorkspace()
+    expect(store.getState().canvasOrchestration.bindings).toEqual([])
+    store.setState({ activeWorktreeId: 'workspace-a', activeWorkspaceKey: worktreeWorkspaceKey('workspace-a') })
+    store.getState().activateCanvasWorkspace()
+    expect(store.getState().canvasOrchestration.bindings.map((binding) => binding.id)).toEqual(['ctx-a'])
+  })
 })

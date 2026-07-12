@@ -1,16 +1,10 @@
-import React, { useState, useEffect } from 'react'
-import { bindingStore } from './canvas-binding-store'
-import type { CanvasOperationalBinding } from '../../../../shared/canvas-agent-types'
+import React, { useState } from 'react'
+import { useAppStore } from '@/store'
 
 export const BindingInspector: React.FC = React.memo(() => {
-  const [bindings, setBindings] = useState<CanvasOperationalBinding[]>(bindingStore.getAll())
+  const bindings = useAppStore((state) => state.canvasOrchestration.bindings)
+  const removeCanvasBinding = useAppStore((state) => state.removeCanvasBinding)
   const [selected, setSelected] = useState<string | null>(null)
-
-  useEffect(() => {
-    return bindingStore.subscribe(() => {
-      setBindings(bindingStore.getAll())
-    })
-  }, [])
 
   const sel = selected ? bindings.find((b) => b.id === selected) : null
 
@@ -56,7 +50,7 @@ export const BindingInspector: React.FC = React.memo(() => {
             {JSON.stringify(sel, null, 2)}
           </pre>
           <button
-            onClick={() => { bindingStore.remove(sel.id); setSelected(null) }}
+            onClick={() => { removeCanvasBinding(sel.id); setSelected(null) }}
             className="mt-2 w-full rounded px-3 py-1.5 text-[12px] text-red-400 transition-colors hover:bg-red-500/10"
           >
             Delete Binding

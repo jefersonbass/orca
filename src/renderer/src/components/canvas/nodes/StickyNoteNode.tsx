@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
+import { useAppStore } from '@/store'
 
 type StickyNoteType = Node<
   { label: string; content?: string; color?: string },
@@ -8,12 +9,20 @@ type StickyNoteType = Node<
 >
 
 export const StickyNoteNode: React.FC<NodeProps<StickyNoteType>> = React.memo(
-  ({ data }) => {
+  ({ id, data }) => {
     const [editing, setEditing] = useState(false)
     const [text, setText] = useState(data.content ?? '')
     const bgColor = data.color ?? '#fef08a'
     const textColor = isLight(bgColor) ? '#1a1a2e' : '#e8e8e8'
     const inputRef = useRef<HTMLInputElement>(null)
+    const setCanvasDocument = useAppStore((state) => state.setCanvasDocument)
+    const persistText = () => {
+      const document = useAppStore.getState().canvasDocument
+      if (!document) return
+      setCanvasDocument({ ...document, nodes: document.nodes.map((node) =>
+        node.id === id ? { ...node, metadata: { ...node.metadata, content: text } } : node
+      ) })
+    }
 
     useEffect(() => {
       if (editing && inputRef.current) inputRef.current.focus()
@@ -35,12 +44,12 @@ export const StickyNoteNode: React.FC<NodeProps<StickyNoteType>> = React.memo(
             onChange={(e) => setText(e.target.value)}
             onBlur={() => {
               setEditing(false)
-              data.content = text
+              persistText()
             }}
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
                 setEditing(false)
-                data.content = text
+                persistText()
               }
             }}
             className="w-full bg-transparent text-[13px] outline-none"

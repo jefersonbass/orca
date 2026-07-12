@@ -1097,6 +1097,8 @@ export type WorkspaceSessionState = {
   sleepingAgentSessionsByPaneKey?: Record<string, SleepingAgentSessionRecord>
   /** Spatial Canvas documents keyed by workspace identity. */
   canvasDocumentsByWorkspaceKey?: Record<string, import('./canvas-types').CanvasDocument>
+  /** Executable Canvas graph state, isolated with its owning workspace. */
+  canvasOrchestrationByWorkspaceKey?: Record<string, import('./canvas-agent-types').CanvasWorkspaceOrchestration>
 }
 
 export type WorkspaceSessionPatch = Partial<WorkspaceSessionState>
