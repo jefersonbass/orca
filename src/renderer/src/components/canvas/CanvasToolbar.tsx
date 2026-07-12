@@ -8,6 +8,7 @@ export type AddNodeType =
   | 'highlight'
   | 'label'
   | 'orchestrator'
+  | 'agent-terminal'
   | 'drawing-freehand'
   | 'drawing-ellipse'
   | 'drawing-polygon'
@@ -35,6 +36,7 @@ const NODE_PALETTE: Array<{ type: AddNodeType; icon: string; label: string }> = 
   { type: 'highlight', icon: '🖍', label: 'Highlight' },
   { type: 'label', icon: 'Aa', label: 'Label' },
   { type: 'orchestrator', icon: '🎯', label: 'Orchestrator' },
+  { type: 'agent-terminal', icon: 'AI', label: 'Agent' },
   { type: 'drawing-freehand', icon: '✏️', label: 'Freehand' },
   { type: 'drawing-ellipse', icon: '◯', label: 'Ellipse' },
   { type: 'drawing-polygon', icon: '⬠', label: 'Polygon' },

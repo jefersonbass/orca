@@ -30,9 +30,9 @@ function referenceForAgentNode(nodeId: string): CanvasAgentReference | null {
   return null
 }
 
-export function prepareContextDelivery(binding: ContextBinding): AgentCanvasMessage {
+export function prepareContextDelivery(binding: ContextBinding, taskId?: string): AgentCanvasMessage {
   const draft: AgentCanvasMessage = {
-    id: messageId(), toAgentId: binding.targetAgentNodeId, type: 'instruction',
+    id: messageId(), toAgentId: binding.targetAgentNodeId, taskId, type: 'instruction',
     content: nodeContent(binding.sourceNodeId),
     contextRefs: [{ nodeId: binding.sourceNodeId, resourceType: 'note' }],
     createdAt: new Date().toISOString(), deliveryState: 'draft'
@@ -56,6 +56,10 @@ export async function deliverApprovedCanvasMessage(messageIdToDeliver: string): 
   const store = useAppStore.getState()
   const message = store.canvasOrchestration.messages.find((item) => item.id === messageIdToDeliver)
   if (!message || !['awaiting-approval', 'queued'].includes(message.deliveryState)) return
+  const owningSession = message.taskId
+    ? store.canvasOrchestration.sessions.find((session) => session.tasks.some((task) => task.id === message.taskId))
+    : undefined
+  if (owningSession && owningSession.state !== 'active') return
   const queued = message.deliveryState === 'queued'
     ? message
     : transitionCanvasMessage(message, 'queued', 'user')

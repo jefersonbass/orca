@@ -34,6 +34,7 @@ const CanvasPageInner: React.FC = () => {
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   const activeRepoId = useAppStore((s) => s.activeRepoId)
   const undoStack = useAppStore((s) => s.undoStack)
+  const agentStatusByPaneKey = useAppStore((s) => s.agentStatusByPaneKey)
   const reactFlowRef = useRef<any>(null)
   const [rfReady, setRfReady] = useState(false)
   const [drawingMode, setDrawingMode] = useState(false)
@@ -99,7 +100,9 @@ const CanvasPageInner: React.FC = () => {
             : type === 'sticky-note' ? 'sticky-note'
             : type as any,
           position: pos,
-          size: type === 'group' ? { width: 300, height: 200 } : { width: 200, height: 100 },
+          size: type === 'group' ? { width: 300, height: 200 }
+            : type === 'agent-terminal' ? { width: 520, height: 320 }
+            : { width: 200, height: 100 },
           zIndex: doc.nodes.length + 1,
           label: type.charAt(0).toUpperCase() + type.slice(1).replace('-', ' '),
         }
@@ -119,6 +122,28 @@ const CanvasPageInner: React.FC = () => {
   const [bindingDraft, setBindingDraft] = useState<{
     sourceNodeId: string; targetNodeId: string; sourceType: string; targetType: string
   } | null>(null)
+
+  const handleAttachAgent = useCallback((paneKey: string) => {
+    if (!nodeCtx || !storeCanvasDocument) return
+    const agent = agentStatusByPaneKey[paneKey]
+    if (!agent?.tabId) return
+    const leafId = paneKey.startsWith(`${agent.tabId}:`)
+      ? paneKey.slice(agent.tabId.length + 1)
+      : undefined
+    setCanvasDocument({
+      ...storeCanvasDocument,
+      nodes: storeCanvasDocument.nodes.map((node) => node.id === nodeCtx.nodeId ? {
+        ...node,
+        type: 'agent-terminal',
+        label: agent.terminalTitle ?? `${agent.agentType ?? 'Agent'} · ${paneKey}`,
+        resourceRef: {
+          kind: 'agent-pane', tabId: agent.tabId!, paneKey,
+          ...(leafId ? { leafId } : {}), worktreeId: agent.worktreeId ?? activeWorktreeId ?? ''
+        }
+      } : node)
+    })
+    setNodeCtx(null)
+  }, [activeWorktreeId, agentStatusByPaneKey, nodeCtx, setCanvasDocument, storeCanvasDocument])
 
   const handleCreateOperationalBinding = useCallback(() => {
     if (!edgeCtx || !storeCanvasDocument) return
@@ -332,6 +357,22 @@ const CanvasPageInner: React.FC = () => {
           aria-label="Node context menu"
         >
           <ColorSubmenu onColor={(c) => { handleNodeColor(c); setNodeCtx(null) }} />
+          {storeCanvasDocument?.nodes.find((node) => node.id === nodeCtx.nodeId)?.type === 'agent-terminal' && (
+            <>
+              <div className="border-t border-worktree-sidebar-border px-3 py-1 text-[10px] uppercase tracking-wider text-worktree-sidebar-foreground/30">
+                Attach live agent
+              </div>
+              {Object.values(agentStatusByPaneKey).length === 0 ? (
+                <div className="px-3 py-1.5 text-xs text-worktree-sidebar-foreground/40">No live agents</div>
+              ) : Object.values(agentStatusByPaneKey).map((agent) => (
+                <button key={agent.paneKey} type="button" role="menuitem"
+                  onClick={() => handleAttachAgent(agent.paneKey)}
+                  className="flex w-full px-3 py-1.5 text-left text-xs text-worktree-sidebar-foreground/70 hover:bg-worktree-sidebar-foreground/5">
+                  {agent.terminalTitle ?? agent.agentType ?? agent.paneKey}
+                </button>
+              ))}
+            </>
+          )}
           <button
             onClick={() => { setShowSendToNote(true); setNodeCtx(null) }}
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-worktree-sidebar-foreground/70 transition-colors hover:bg-worktree-sidebar-foreground/5"

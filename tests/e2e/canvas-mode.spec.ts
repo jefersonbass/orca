@@ -46,6 +46,12 @@ test.describe('Spatial Canvas', () => {
       return note?.metadata?.content
     })).toBe('Feature specification from Electron E2E')
 
+    await orcaPage.getByRole('button', { name: 'Add node' }).click()
+    await orcaPage.getByRole('menuitem', { name: 'Add Agent' }).click()
+    await expect(orcaPage.locator('.react-flow__node-agent-terminal')).toHaveCount(1)
+    await orcaPage.getByRole('button', { name: 'Fit view', exact: true }).click()
+    await expect(orcaPage.locator('[aria-label^="Agent terminal:"]')).toBeVisible()
+
     const originalKey = await getStoreState<string>(orcaPage, 'activeWorkspaceKey')
     await orcaPage.evaluate(() => {
       const store = window.__store
@@ -54,6 +60,7 @@ test.describe('Spatial Canvas', () => {
       store.getState().activateCanvasWorkspace()
     })
     await expect(orcaPage.locator('[aria-label="Note: Note"]')).toHaveCount(0)
+    await expect(orcaPage.locator('.react-flow__node-agent-terminal')).toHaveCount(0)
 
     await orcaPage.evaluate((key) => {
       const store = window.__store
@@ -62,5 +69,6 @@ test.describe('Spatial Canvas', () => {
       store.getState().activateCanvasWorkspace()
     }, originalKey)
     await expect(orcaPage.getByText('Feature specification from Electron E2E')).toBeVisible()
+    await expect(orcaPage.locator('.react-flow__node-agent-terminal')).toHaveCount(1)
   })
 })

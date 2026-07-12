@@ -3,7 +3,7 @@ import { useAppStore } from '@/store'
 import { AgentInboxOutbox } from './AgentInboxOutbox'
 import { approveCanvasOutput, deliverApprovedCanvasMessage, executableContextBindings, executableDelegationBindings, prepareContextDelivery, prepareDelegationDelivery } from './canvas-orchestration-runtime'
 import { transitionCanvasMessage } from '../../../../shared/canvas-state-machines'
-import { createCollaborationFromBindings, transitionCanvasCollaboration } from './canvas-collaboration-controller'
+import { createSpecificationCollaboration, specificationWorkflowCandidates, transitionCanvasCollaboration } from './canvas-collaboration-controller'
 
 export const CanvasOrchestrationPanel: React.FC = () => {
   const orchestration = useAppStore((state) => state.canvasOrchestration)
@@ -11,7 +11,7 @@ export const CanvasOrchestrationPanel: React.FC = () => {
   const contextBindings = executableContextBindings(orchestration.bindings)
   const delegationBindings = executableDelegationBindings(orchestration.bindings)
   const [delegationText, setDelegationText] = useState('')
-  const leadCandidates = [...new Set(delegationBindings.map((binding) => binding.sourceAgentNodeId))]
+  const workflowCandidates = specificationWorkflowCandidates()
 
   const approve = (id: string) => {
     const message = useAppStore.getState().canvasOrchestration.messages.find((item) => item.id === id)
@@ -64,10 +64,10 @@ export const CanvasOrchestrationPanel: React.FC = () => {
           onApproveMessage={approve} onRejectMessage={reject} onRetryMessage={retry} />
       </div>
       <div className="border-t border-worktree-sidebar-border p-3">
-        {orchestration.sessions.length === 0 ? leadCandidates.map((leadId) => (
-          <button key={leadId} type="button" onClick={() => createCollaborationFromBindings(leadId)}
+        {orchestration.sessions.length === 0 ? workflowCandidates.map((candidate) => (
+          <button key={candidate.contextBinding.id} type="button" onClick={() => createSpecificationCollaboration(candidate)}
             className="w-full rounded-md border border-worktree-sidebar-border px-2 py-1.5 text-xs text-worktree-sidebar-foreground">
-            Create collaboration for {leadId}
+            Create specification workflow for {candidate.leadAgentNodeId} + {candidate.developerAgentNodeIds.length} developers
           </button>
         )) : orchestration.sessions.map((session) => (
           <div key={session.id} className="mb-2 rounded-md border border-worktree-sidebar-border p-2 text-xs">
