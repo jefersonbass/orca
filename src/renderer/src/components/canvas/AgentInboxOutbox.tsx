@@ -18,7 +18,7 @@ export const AgentInboxOutbox: React.FC<AgentInboxOutboxProps> = React.memo(({
 }) => {
   const [tab, setTab] = useState<'inbox' | 'outbox'>('inbox')
 
-  const inboxMessages = messages.filter((m) => m.deliveryState === 'queued' || m.deliveryState === 'delivered')
+  const inboxMessages = messages.filter((m) => ['awaiting-approval', 'queued', 'delivering', 'delivered'].includes(m.deliveryState))
   const outboxMessages = messages
 
   return (
@@ -65,7 +65,7 @@ export const AgentInboxOutbox: React.FC<AgentInboxOutboxProps> = React.memo(({
               {new Date(msg.createdAt).toLocaleString()} · {msg.id}
             </div>
 
-            {tab === 'inbox' && msg.deliveryState === 'queued' && (
+            {tab === 'inbox' && msg.deliveryState === 'awaiting-approval' && (
               <div className="mt-2 flex gap-2">
                 <button
                   onClick={() => onApproveMessage(msg.id)}
@@ -118,9 +118,11 @@ const DeliveryStateBadge: React.FC<{ state: string }> = ({ state }) => {
     draft: 'text-gray-400',
     'awaiting-approval': 'text-yellow-400',
     queued: 'text-blue-400',
+    delivering: 'text-blue-300',
     delivered: 'text-green-400',
     acknowledged: 'text-green-400',
     failed: 'text-red-400',
+    cancelled: 'text-gray-500',
   }
   return <span className={`text-[10px] font-medium ${colors[state] ?? ''}`}>{state}</span>
 }

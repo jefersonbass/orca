@@ -69,6 +69,8 @@ export type CanvasOperationalBinding = ContextBinding | DelegationBinding | Outp
 
 export type AgentMessageType = 'instruction' | 'delegation' | 'review-request' | 'fix-request' | 'status' | 'blocked' | 'result' | 'question'
 export type MessageDeliveryState = 'draft' | 'awaiting-approval' | 'queued' | 'delivering' | 'delivered' | 'acknowledged' | 'failed' | 'cancelled'
+export type CanvasTransitionActor = 'user' | 'agent' | 'system'
+export type CanvasStateTransition = { from: string; to: string; at: string; actor: CanvasTransitionActor; reason?: string }
 
 export type AgentCanvasMessage = {
   id: string
@@ -83,6 +85,7 @@ export type AgentCanvasMessage = {
   deliveryError?: string
   providerReceipt?: string
   deliveredAt?: string
+  transitions?: CanvasStateTransition[]
 }
 
 // ── Agent Tasks ──
@@ -103,6 +106,7 @@ export type CanvasAgentTask = {
   resultSummary?: string
   createdAt: string
   updatedAt: string
+  transitions?: CanvasStateTransition[]
 }
 
 // ── Collaboration Session ──
@@ -118,6 +122,7 @@ export type CollaborationSession = {
   state: CollaborationSessionState
   createdAt: string
   updatedAt: string
+  transitions?: CanvasStateTransition[]
 }
 
 export type CanvasWorkspaceOrchestration = {

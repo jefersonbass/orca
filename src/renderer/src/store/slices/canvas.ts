@@ -4,6 +4,7 @@ import type { CanvasDocument, CanvasUndoStack } from '../../../../shared/canvas-
 import type { WorkspaceSessionState } from '../../../../shared/types'
 import type { AgentCanvasMessage, CanvasAgentTask, CanvasOperationalBinding, CanvasWorkspaceOrchestration, CollaborationSession } from '../../../../shared/canvas-agent-types'
 import { worktreeWorkspaceKey } from '../../../../shared/workspace-scope'
+import { reconcileCanvasOrchestrationAfterRestart } from '../../../../shared/canvas-state-machines'
 
 export interface CanvasSlice {
   // Document state
@@ -100,7 +101,12 @@ export function createCanvasSlice(): StateCreator<AppState, [], [], CanvasSlice>
       }),
     hydrateCanvasSession: (session) => set({
       canvasDocumentsByWorkspaceKey: session.canvasDocumentsByWorkspaceKey ?? {},
-      canvasOrchestrationByWorkspaceKey: session.canvasOrchestrationByWorkspaceKey ?? {}
+      canvasOrchestrationByWorkspaceKey: Object.fromEntries(
+        Object.entries(session.canvasOrchestrationByWorkspaceKey ?? {}).map(([key, value]) => [
+          key,
+          reconcileCanvasOrchestrationAfterRestart(value)
+        ])
+      )
     }),
     addCanvasBinding: (binding) => set((state) => updateActiveOrchestration(state, (current) => ({ ...current, bindings: [...current.bindings, binding] }))),
     updateCanvasBinding: (id, updates) => set((state) => updateActiveOrchestration(state, (current) => ({ ...current, bindings: current.bindings.map((binding) => binding.id === id ? { ...binding, ...updates } as CanvasOperationalBinding : binding) }))),
