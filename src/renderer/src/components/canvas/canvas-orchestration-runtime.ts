@@ -3,6 +3,13 @@ import type { AgentCanvasMessage, CanvasOperationalBinding, ContextBinding } fro
 import type { CanvasAgentReference, DelegationBinding, OutputBinding, ReportingBinding } from '../../../../shared/canvas-agent-types'
 import { readAgentMessageIds, resolveCanvasAgent, sendInstruction, waitForAgentResponse } from './canvas-provider-adapter'
 import { transitionCanvasMessage } from '../../../../shared/canvas-state-machines'
+import {
+  activateTaskForDelivery,
+  advanceSpecificationWorkflow,
+  completeSpecificationWorkflowAfterOutput,
+  failTaskForDelivery,
+  persistWorkflowMessage
+} from './canvas-workflow-progression'
 
 function messageId(): string {
   return `msg_${crypto.randomUUID()}`
@@ -30,15 +37,15 @@ function referenceForAgentNode(nodeId: string): CanvasAgentReference | null {
   return null
 }
 
-export function prepareContextDelivery(binding: ContextBinding, taskId?: string): AgentCanvasMessage {
+export function prepareContextDelivery(binding: ContextBinding, taskId?: string, contentOverride?: string): AgentCanvasMessage {
   const draft: AgentCanvasMessage = {
     id: messageId(), toAgentId: binding.targetAgentNodeId, taskId, type: 'instruction',
-    content: nodeContent(binding.sourceNodeId),
+    content: contentOverride ?? nodeContent(binding.sourceNodeId),
     contextRefs: [{ nodeId: binding.sourceNodeId, resourceType: 'note' }],
     createdAt: new Date().toISOString(), deliveryState: 'draft'
   }
   const message = transitionCanvasMessage(draft, 'awaiting-approval', 'user')
-  useAppStore.getState().upsertCanvasMessage(message)
+  persistWorkflowMessage(message)
   return message
 }
 
@@ -48,7 +55,7 @@ export function prepareDelegationDelivery(binding: DelegationBinding, content: s
     type: 'delegation', content, contextRefs: [], createdAt: new Date().toISOString(), deliveryState: 'draft'
   }
   const message = transitionCanvasMessage(draft, 'awaiting-approval', 'user')
-  useAppStore.getState().upsertCanvasMessage(message)
+  persistWorkflowMessage(message)
   return message
 }
 
@@ -60,33 +67,38 @@ export async function deliverApprovedCanvasMessage(messageIdToDeliver: string): 
     ? store.canvasOrchestration.sessions.find((session) => session.tasks.some((task) => task.id === message.taskId))
     : undefined
   if (owningSession && owningSession.state !== 'active') return
+  activateTaskForDelivery(message)
   const queued = message.deliveryState === 'queued'
     ? message
     : transitionCanvasMessage(message, 'queued', 'user')
   const ref = referenceForAgentNode(message.toAgentId)
   if (!ref) {
     const delivering = transitionCanvasMessage(queued, 'delivering', 'system')
-    store.upsertCanvasMessage({ ...transitionCanvasMessage(delivering, 'failed', 'system'), deliveryError: 'Target agent node has no live resource reference' })
+    persistWorkflowMessage({ ...transitionCanvasMessage(delivering, 'failed', 'system'), deliveryError: 'Target agent node has no live resource reference' })
+    failTaskForDelivery(message, 'Target agent node has no live resource reference')
     return
   }
   const target = resolveCanvasAgent(ref, store.agentStatusByPaneKey)
   if (!target.ok) {
     const delivering = transitionCanvasMessage(queued, 'delivering', 'system')
-    store.upsertCanvasMessage({ ...transitionCanvasMessage(delivering, 'failed', 'system'), deliveryError: target.error })
+    persistWorkflowMessage({ ...transitionCanvasMessage(delivering, 'failed', 'system'), deliveryError: target.error })
+    failTaskForDelivery(message, target.error)
     return
   }
   const delivering = transitionCanvasMessage(queued, 'delivering', 'system')
-  store.upsertCanvasMessage(delivering)
+  persistWorkflowMessage(delivering)
   try {
     const baseline = await readAgentMessageIds(target)
     const delivery = await sendInstruction(target, message)
     if (!delivery.success) {
-      store.upsertCanvasMessage({ ...transitionCanvasMessage(delivering, 'failed', 'system'), deliveryError: delivery.error })
+      persistWorkflowMessage({ ...transitionCanvasMessage(delivering, 'failed', 'system'), deliveryError: delivery.error })
+      failTaskForDelivery(message, delivery.error ?? 'Provider delivery failed')
       return
     }
     const delivered = { ...transitionCanvasMessage(delivering, 'delivered', 'system'), providerReceipt: delivery.providerReceipt, deliveredAt: delivery.timestamp }
-    store.upsertCanvasMessage(delivered)
+    persistWorkflowMessage(delivered)
     const response = await waitForAgentResponse({ target, baselineMessageIds: baseline })
+    const handledByWorkflow = advanceSpecificationWorkflow(message, response)
     const output = useAppStore.getState().canvasOrchestration.bindings.find((binding): binding is OutputBinding =>
       binding.kind === 'output' && binding.sourceAgentNodeId === message.toAgentId && binding.enabled
     )
@@ -95,7 +107,7 @@ export async function deliverApprovedCanvasMessage(messageIdToDeliver: string): 
     )
     const responseDraft: AgentCanvasMessage = {
       id: messageId(), fromAgentId: message.toAgentId,
-      toAgentId: output?.targetNoteNodeId ?? reporting?.targetAgentNodeId ?? 'unbound-output', type: 'result', content: response.content,
+      toAgentId: output?.targetNoteNodeId ?? reporting?.targetAgentNodeId ?? 'unbound-output', taskId: message.taskId, type: 'result', content: response.content,
       contextRefs: [{ nodeId: message.toAgentId, resourceType: 'agent-response', snapshotHash: response.messageId }],
       createdAt: new Date(response.timestamp ?? Date.now()).toISOString(),
       deliveryState: output || reporting ? 'draft' : 'delivered'
@@ -103,10 +115,11 @@ export async function deliverApprovedCanvasMessage(messageIdToDeliver: string): 
     const responseMessage = output || reporting
       ? transitionCanvasMessage(responseDraft, 'awaiting-approval', 'system')
       : responseDraft
-    useAppStore.getState().upsertCanvasMessage(responseMessage)
-    useAppStore.getState().upsertCanvasMessage(transitionCanvasMessage(delivered, 'acknowledged', 'system'))
+    if (!handledByWorkflow) persistWorkflowMessage(responseMessage)
+    persistWorkflowMessage(transitionCanvasMessage(delivered, 'acknowledged', 'system'))
   } catch (error) {
-    useAppStore.getState().upsertCanvasMessage({ ...transitionCanvasMessage(delivering, 'failed', 'system'), deliveryError: String(error) })
+    persistWorkflowMessage({ ...transitionCanvasMessage(delivering, 'failed', 'system'), deliveryError: String(error) })
+    failTaskForDelivery(message, String(error))
   }
 }
 
@@ -115,6 +128,10 @@ export function approveCanvasOutput(messageIdToAppend: string): void {
   const message = store.canvasOrchestration.messages.find((item) => item.id === messageIdToAppend)
   const document = store.canvasDocument
   if (!message || message.type !== 'result' || !document || message.deliveryState !== 'awaiting-approval') return
+  const owningSession = message.taskId
+    ? store.canvasOrchestration.sessions.find((session) => session.tasks.some((task) => task.id === message.taskId))
+    : undefined
+  if (owningSession && owningSession.state !== 'active') return
   store.setCanvasDocument({
     ...document,
     nodes: document.nodes.map((node) => {
@@ -127,7 +144,9 @@ export function approveCanvasOutput(messageIdToAppend: string): void {
   const queued = transitionCanvasMessage(message, 'queued', 'user')
   const delivering = transitionCanvasMessage(queued, 'delivering', 'system')
   const delivered = transitionCanvasMessage(delivering, 'delivered', 'system')
-  store.upsertCanvasMessage({ ...transitionCanvasMessage(delivered, 'acknowledged', 'system'), deliveredAt: new Date().toISOString() })
+  const acknowledged = { ...transitionCanvasMessage(delivered, 'acknowledged', 'system'), deliveredAt: new Date().toISOString() }
+  persistWorkflowMessage(acknowledged)
+  completeSpecificationWorkflowAfterOutput(acknowledged)
 }
 
 export function executableContextBindings(bindings: CanvasOperationalBinding[]): ContextBinding[] {

@@ -9,10 +9,12 @@ import type {
   ReportingBinding
 } from '../../../../shared/canvas-agent-types'
 import {
+  transitionCanvasMessage,
   transitionCanvasTask,
   transitionCollaborationSession
 } from '../../../../shared/canvas-state-machines'
 import { prepareContextDelivery } from './canvas-orchestration-runtime'
+import { planningPrompt } from './canvas-workflow-progression'
 
 export type SpecificationWorkflowCandidate = {
   contextBinding: ContextBinding
@@ -113,10 +115,46 @@ export function transitionCanvasCollaboration(id: string, to: CollaborationSessi
     running = transitionCanvasTask(running, 'assigned', 'system')
     running = transitionCanvasTask(running, 'running', 'system')
     session = updateSessionTask(session, running)
+    // Persist the active state before creating the task-bound message so the
+    // message is attached to the new session version instead of the previous
+    // awaiting-approval snapshot.
+    store.upsertCollaborationSession(session)
     const contextBinding = store.canvasOrchestration.bindings.find(
       (binding): binding is ContextBinding => binding.kind === 'context' && running.contextBindingIds.includes(binding.id)
     )
-    if (contextBinding) prepareContextDelivery(contextBinding, running.id)
+    if (contextBinding) {
+      const specificationNode = store.canvasDocument?.nodes.find((node) => node.id === contextBinding.sourceNodeId)
+      const specification = typeof specificationNode?.metadata?.content === 'string'
+        ? specificationNode.metadata.content
+        : ''
+      prepareContextDelivery(
+        contextBinding,
+        running.id,
+        planningPrompt(specification, session.subordinateAgentNodeIds)
+      )
+      session = useAppStore.getState().canvasOrchestration.sessions.find((item) => item.id === session.id) ?? session
+    }
+  }
+  if (to === 'cancelled') {
+    const terminalTaskStates = new Set(['completed', 'failed', 'cancelled'])
+    const terminalMessageStates = new Set(['acknowledged', 'failed', 'cancelled'])
+    const cancelledTasks = session.tasks.map((task) => {
+      if (terminalTaskStates.has(task.state)) return task
+      const cancelled = transitionCanvasTask(task, 'cancelled', 'user', 'Collaboration cancelled')
+      store.upsertCanvasTask(cancelled)
+      return cancelled
+    })
+    const sessionTaskIds = new Set(session.tasks.map((task) => task.id))
+    const authoritativeMessages = store.canvasOrchestration.messages.filter((message) =>
+      message.taskId ? sessionTaskIds.has(message.taskId) : session.messages.some((item) => item.id === message.id)
+    )
+    const cancelledMessages = authoritativeMessages.map((message) => {
+      if (terminalMessageStates.has(message.deliveryState)) return message
+      const cancelled = transitionCanvasMessage(message, 'cancelled', 'user', 'Collaboration cancelled')
+      store.upsertCanvasMessage(cancelled)
+      return cancelled
+    })
+    session = { ...session, tasks: cancelledTasks, messages: cancelledMessages }
   }
   store.upsertCollaborationSession(session)
 }

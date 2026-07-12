@@ -77,6 +77,7 @@ export const CanvasOrchestrationPanel: React.FC = () => {
               {session.state === 'awaiting-approval' && <button onClick={() => transitionCanvasCollaboration(session.id, 'active')}>Approve start</button>}
               {session.state === 'active' && <button onClick={() => transitionCanvasCollaboration(session.id, 'paused')}>Pause</button>}
               {session.state === 'paused' && <button onClick={() => transitionCanvasCollaboration(session.id, 'active')}>Resume</button>}
+              {session.state === 'blocked' && <button onClick={() => transitionCanvasCollaboration(session.id, 'active')}>Resume</button>}
               {!['completed', 'cancelled', 'failed'].includes(session.state) && <button onClick={() => transitionCanvasCollaboration(session.id, 'cancelled')}>Cancel</button>}
             </div>
           </div>
