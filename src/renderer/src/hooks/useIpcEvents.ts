@@ -2832,7 +2832,7 @@ export function useIpcEvents(): void {
         const { activeView, activeTabType, editorFontZoomLevel, setEditorFontZoomLevel, settings } =
           store
         const target = resolveZoomTarget({
-          activeView,
+          activeView: activeView === 'canvas' ? 'terminal' : activeView,
           activeTabType,
           activeElement: document.activeElement
         })

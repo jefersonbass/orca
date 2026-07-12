@@ -507,6 +507,7 @@ const TOP_LEVEL_VIEW_LOOKUP: Record<TopLevelView, true> = {
   automations: true,
   space: true,
   skills: true,
+  canvas: true,
   mobile: true
 }
 const KNOWN_TOP_LEVEL_VIEWS = new Set<string>(Object.keys(TOP_LEVEL_VIEW_LOOKUP))
@@ -624,6 +625,7 @@ export type UISlice = {
   unacknowledgeAgents: (paneKeys: string[]) => void
   activeView: TopLevelView
   previousViewBeforeTasks:
+    | 'canvas'
     | 'terminal'
     | 'settings'
     | 'activity'
@@ -632,6 +634,7 @@ export type UISlice = {
     | 'skills'
     | 'mobile'
   previousViewBeforeSettings:
+    | 'canvas'
     | 'terminal'
     | 'tasks'
     | 'activity'
@@ -640,6 +643,7 @@ export type UISlice = {
     | 'skills'
     | 'mobile'
   previousViewBeforeActivity:
+    | 'canvas'
     | 'terminal'
     | 'settings'
     | 'tasks'
@@ -648,6 +652,7 @@ export type UISlice = {
     | 'skills'
     | 'mobile'
   previousViewBeforeAutomations:
+    | 'canvas'
     | 'terminal'
     | 'settings'
     | 'tasks'
@@ -656,6 +661,7 @@ export type UISlice = {
     | 'skills'
     | 'mobile'
   previousViewBeforeSpace:
+    | 'canvas'
     | 'terminal'
     | 'settings'
     | 'tasks'
@@ -664,6 +670,7 @@ export type UISlice = {
     | 'skills'
     | 'mobile'
   previousViewBeforeSkills:
+    | 'canvas'
     | 'terminal'
     | 'settings'
     | 'tasks'
@@ -672,6 +679,7 @@ export type UISlice = {
     | 'space'
     | 'mobile'
   previousViewBeforeMobile:
+    | 'canvas'
     | 'terminal'
     | 'settings'
     | 'tasks'

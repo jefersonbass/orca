@@ -93,6 +93,11 @@ import {
   useActivityTerminalPortals,
   type ActivityTerminalPortalTarget
 } from './activity/activity-terminal-portal'
+import {
+  findCanvasPortal,
+  useCanvasTerminalPortals,
+  type CanvasPortalTarget
+} from './canvas/canvas-terminal-portal'
 import { isRemoteRuntimePtyId } from '@/runtime/runtime-terminal-inspection'
 import {
   activateWebRuntimeSessionTab,
@@ -315,6 +320,9 @@ function Terminal(): React.JSX.Element | null {
   // portal at the new worktree's stale last-active tab.
   const activityTerminalPortals: ActivityTerminalPortalTarget[] = useActivityTerminalPortals(
     activeView === 'activity'
+  )
+  const canvasTerminalPortals: CanvasPortalTarget[] = useCanvasTerminalPortals(
+    activeView === 'canvas'
   )
   const foregroundTerminalTabIds = useMemo(() => {
     const ids = new Set<string>()
@@ -2163,12 +2171,17 @@ function Terminal(): React.JSX.Element | null {
                           activityTerminalPortals,
                           { worktreeId: workspace.id, tabId: tab.id }
                         )
+                        const canvasPortal = findCanvasPortal(canvasTerminalPortals, {
+                          tabId: tab.id
+                        })
                         const isActivityPortalTab = activityTerminalPortal !== null
+                        const isCanvasPortalTab = canvasPortal !== null
+                        const isAnyPortalTab = isActivityPortalTab || isCanvasPortalTab
                         const isActiveTerminalTab =
                           isVisible && tab.id === activeTabId && activeTabType === 'terminal'
                         // Why: parking unmounts the view while preserving the PTY;
                         // an Activity portal remains mounted as a visible consumer.
-                        if (shouldColdParkTerminalPanes && !isActivityPortalTab) {
+                        if (shouldColdParkTerminalPanes && !isAnyPortalTab) {
                           return null
                         }
                         const terminalPane = (
@@ -2178,21 +2191,25 @@ function Terminal(): React.JSX.Element | null {
                             worktreeId={workspace.id}
                             cwd={tab.startupCwd ?? workspace.path}
                             isActive={
-                              isActiveTerminalTab || activityTerminalPortal?.active === true
+                              isActiveTerminalTab ||
+                              activityTerminalPortal?.active === true ||
+                              canvasPortal?.active === true
                             }
                             // Why: the activity page hosts this existing pane via
                             // portal while the workspace surface remains hidden.
                             // Keeping `isVisible` true for the portaled tab lets
                             // xterm fit and stream foreground output in-place.
-                            isVisible={isActiveTerminalTab || isActivityPortalTab}
+                            isVisible={isActiveTerminalTab || isAnyPortalTab}
                             // Why: inactive tabs in the visible legacy surface
                             // are tab-hidden, not worktree-hidden, so they need
                             // the same light resume path as split-group overlays.
-                            isWorktreeActive={isVisible || isActivityPortalTab}
+                            isWorktreeActive={isVisible || isAnyPortalTab}
                             // Why: when portaled to Activity for a specific agent
                             // pane, isolate that leaf so split siblings stay
                             // hidden. Workspace renders pass null → no override.
-                            isolatedPaneKey={activityTerminalPortal?.paneKey ?? null}
+                            isolatedPaneKey={
+                              activityTerminalPortal?.paneKey ?? canvasPortal?.paneKey ?? null
+                            }
                             onPtyExit={(ptyId) => handlePtyExit(tab.id, ptyId)}
                             onCloseTab={() => handleCloseTab(tab.id)}
                           />
@@ -2202,6 +2219,13 @@ function Terminal(): React.JSX.Element | null {
                             terminalPane,
                             activityTerminalPortal.target,
                             `activity-terminal-${tab.id}`
+                          )
+                        }
+                        if (canvasPortal) {
+                          return createPortal(
+                            terminalPane,
+                            canvasPortal.target,
+                            `canvas-terminal-${tab.id}`
                           )
                         }
                         return terminalPane

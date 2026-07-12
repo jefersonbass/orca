@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Orca Canvas — React Flow PoC</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --bg-secondary: #16213e;
+    --surface: #0f3460;
+    --border: #533483;
+    --text: #e8e8e8;
+    --text-muted: #888;
+    --accent: #e94560;
+    --success: #2ecc71;
+    --warning: #f39c12;
+    --radius: 8px;
+    --font: 'Segoe UI', -apple-system, sans-serif;
+  }
+  [data-theme="light"] {
+    --bg: #f8f9fa;
+    --bg-secondary: #e9ecef;
+    --surface: #ffffff;
+    --border: #dee2e6;
+    --text: #212529;
+    --text-muted: #6c757d;
+    --accent: #e94560;
+    --success: #2ecc71;
+    --warning: #f39c12;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+  }
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    height: 48px;
+    user-select: none;
+  }
+  #toolbar button {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: var(--font);
+    transition: opacity 0.15s;
+  }
+  #toolbar button:hover { opacity: 0.8; }
+  #toolbar .spacer { flex: 1; }
+  #toolbar .metric {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 0 8px;
+  }
+  #toolbar select {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px 8px;
+    font-size: 13px;
+    font-family: var(--font);
+  }
+  #canvas-container {
+    width: 100vw;
+    height: calc(100vh - 48px);
+    position: relative;
+  }
+  .react-flow__node {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 12px;
+    padding: 0;
+    min-width: 180px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+  .summary-node {
+    padding: 0;
+    font-family: var(--font);
+  }
+  .summary-node .header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(0,0,0,0.1);
+    border-radius: var(--radius) var(--radius) 0 0;
+    cursor: grab;
+  }
+  .summary-node .header:active { cursor: grabbing; }
+  .summary-node .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .summary-node .status-dot.idle { background: var(--text-muted); }
+  .summary-node .status-dot.working { background: var(--warning); animation: pulse 1s infinite; }
+  .summary-node .status-dot.done { background: var(--success); }
+  .summary-node .status-dot.error { background: var(--accent); }
+  .summary-node .body {
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .summary-node .label {
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .summary-node .subtitle {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .summary-node .worktree {
+    font-size: 10px;
+    color: var(--text-muted);
+    background: rgba(255,255,255,0.05);
+    padding: 2px 6px;
+    border-radius: 4px;
+    display: inline-block;
+    width: fit-content;
+  }
+  .summary-node .resize-handle {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 12px;
+    height: 12px;
+    cursor: nwse-resize;
+    background: linear-gradient(135deg, transparent 50%, var(--border) 50%);
+    border-radius: 0 0 var(--radius) 0;
+  }
+  #fps-counter {
+    position: fixed;
+    bottom: 8px;
+    right: 8px;
+    background: rgba(0,0,0,0.7);
+    color: #0f0;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 11px;
+    z-index: 9999;
+    pointer-events: none;
+  }
+  #node-counter {
+    position: fixed;
+    bottom: 8px;
+    left: 8px;
+    background: rgba(0,0,0,0.7);
+    color: var(--text);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 11px;
+    z-index: 9999;
+    pointer-events: none;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  .react-flow__background {
+    background: var(--bg) !important;
+  }
+  /* Accessibility */
+  .react-flow__node:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  button:focus-visible, select:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button onclick="addNodes(5)">+5 Nodes</button>
+  <button onclick="addNodes(1)">+1 Node</button>
+  <button onclick="resetNodes()">Reset</button>
+  <span class="spacer"></span>
+  <span class="metric" id="node-count">Nodes: 0</span>
+  <span class="metric" id="fps-display">FPS: --</span>
+  <span class="metric" id="mount-count">Mounts: 0</span>
+  <select id="theme-select" onchange="setTheme(this.value)">
+    <option value="dark">Dark</option>
+    <option value="light">Light</option>
+  </select>
+  <button onclick="window.__rf.fitView()">Fit View</button>
+  <button onclick="window.__rf.zoomTo(1)">Reset Zoom</button>
+</div>
+
+<div id="canvas-container"></div>
+<div id="fps-counter">FPS: --</div>
+<div id="node-counter">Nodes: 0</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.3.1",
+    "react-dom": "https://esm.sh/react-dom@18.3.1",
+    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+    "@xyflow/react": "https://esm.sh/@xyflow/react@12.5.5",
+    "@xyflow/react/dist/style.css": "https://esm.sh/@xyflow/react@12.5.5/dist/style.css"
+  }
+}
+</script>
+
+<script type="module">
+import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
+import ReactDOM from 'react-dom/client';
+import {
+  ReactFlow,
+  ReactFlowProvider,
+  Controls,
+  Background,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  Handle,
+  Position,
+} from '@xyflow/react';
+
+// ── FPS Counter ──
+let lastFrameTime = performance.now();
+let frameCount = 0;
+let fpsElement = document.getElementById('fps-display');
+
+function updateFPS() {
+  const now = performance.now();
+  frameCount++;
+  if (now - lastFrameTime >= 1000) {
+    const fps = Math.round(frameCount * 1000 / (now - lastFrameTime));
+    fpsElement.textContent = `FPS: ${fps}`;
+    document.getElementById('fps-counter').textContent = `FPS: ${fps}`;
+    frameCount = 0;
+    lastFrameTime = now;
+  }
+  requestAnimationFrame(updateFPS);
+}
+requestAnimationFrame(updateFPS);
+
+// ── Mount Counter ──
+let mountCount = 0;
+
+// ── Status options ──
+const statuses = ['idle', 'working', 'done', 'error'];
+
+// ── Summary Node Component ──
+const SummaryNode = memo(({ data }) => {
+  const mountRef = useRef(null);
+  useEffect(() => {
+    mountCount++;
+    document.getElementById('mount-count').textContent = `Mounts: ${mountCount}`;
+    return () => { mountCount--; document.getElementById('mount-count').textContent = `Mounts: ${mountCount}`; };
+  }, []);
+
+  return (
+    <div className="summary-node" role="button" aria-label={`${data.label}, ${data.status} node`} tabIndex={0}>
+      <div className="header">
+        <div className={`status-dot ${data.status}`} aria-hidden="true" />
+        <span className="label">{data.label}</span>
+      </div>
+      <div className="body">
+        {data.worktree && <span className="worktree">{data.worktree}</span>}
+        <span className="subtitle">Status: {data.status}</span>
+      </div>
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
+      <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
+    </div>
+  );
+});
+
+// ── Node Types ──
+const nodeTypes = { summary: SummaryNode };
+
+// ── Create initial nodes ──
+const worktrees = ['feature/auth', 'bugfix/api', 'main', 'feature/ui', 'chore/deps', 'feature/docs'];
+const agentNames = ['Claude', 'Codex', 'Gemini', 'Cursor', 'Copilot'];
+const shellNames = ['zsh', 'bash', 'pwsh', 'ssh:dev', 'ssh:prod'];
+
+let nodeIdCounter = 0;
+
+function createNode(x, y) {
+  const isAgent = Math.random() > 0.5;
+  const name = isAgent ? agentNames[Math.floor(Math.random() * agentNames.length)]
+                       : shellNames[Math.floor(Math.random() * shellNames.length)];
+  const wt = worktrees[Math.floor(Math.random() * worktrees.length)];
+  const status = statuses[Math.floor(Math.random() * statuses.length)];
+  const id = `n-${++nodeIdCounter}`;
+  return {
+    id,
+    type: 'summary',
+    position: { x: x + (Math.random() - 0.5) * 50, y: y + (Math.random() - 0.5) * 30 },
+    data: {
+      label: `${isAgent ? 'Agent' : 'Terminal'}: ${name}`,
+      status,
+      worktree: wt,
+      type: isAgent ? 'agent-summary' : 'terminal-summary',
+    },
+    selected: false,
+  };
+}
+
+function createInitialNodes(count = 30) {
+  const nodes = [];
+  const cols = Math.ceil(Math.sqrt(count));
+  const spacingX = 220;
+  const spacingY = 140;
+  for (let i = 0; i < count; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    nodes.push(createNode(col * spacingX - (cols * spacingX) / 2, row * spacingY - (Math.ceil(count / cols) * spacingY) / 2));
+  }
+  return nodes;
+}
+
+// ── App Component ──
+function CanvasApp() {
+  const [nodes, setNodes, onNodesChange] = useNodesState(createInitialNodes(30));
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const reactFlowWrapper = useRef(null);
+  const [reactFlowInstance, setReactFlowInstance] = useState(null);
+
+  // Expose reactFlowInstance globally
+  const onInit = useCallback((instance) => {
+    setReactFlowInstance(instance);
+    window.__rf = instance;
+  }, []);
+
+  // Update counters
+  useEffect(() => {
+    document.getElementById('node-count').textContent = `Nodes: ${nodes.length}`;
+    document.getElementById('node-counter').textContent = `Nodes: ${nodes.length} | Selected: ${nodes.filter(n => n.selected).length}`;
+  }, [nodes.length]);
+
+  // Keyboard handlers
+  const onKeyDown = useCallback((evt) => {
+    if (evt.key === 'Delete' || evt.key === 'Backspace') {
+      setNodes((nds) => nds.filter((n) => !n.selected));
+    }
+  }, []);
+
+  // Add nodes function
+  window.addNodes = (count) => {
+    setNodes((nds) => {
+      const newNodes = [];
+      for (let i = 0; i < count; i++) {
+        newNodes.push(createNode(
+          (Math.random() - 0.5) * 600,
+          (Math.random() - 0.5) * 600
+        ));
+      }
+      return [...nds, ...newNodes];
+    });
+  };
+
+  window.resetNodes = () => {
+    setNodes(createInitialNodes(30));
+  };
+
+  return (
+    <div style={{ width: '100%', height: '100%' }}>
+      <ReactFlowProvider>
+        <div style={{ width: '100%', height: '100%' }} role="application" aria-label="Canvas prototype" onKeyDown={onKeyDown}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onInit={onInit}
+            nodeTypes={nodeTypes}
+            fitView
+            minZoom={0.1}
+            maxZoom={5}
+            snapToGrid={true}
+            snapGrid={[20, 20]}
+            deleteKeyCode="Delete"
+            multiSelectionKeyCode="Shift"
+            selectionOnDrag
+            panOnDrag={[1, 2]}
+            selectNodesOnDrag
+            ariaLabel="Canvas workspace with draggable nodes"
+          >
+            <Controls showInteractive={false} />
+            <Background variant="dots" gap={20} size={1} />
+            <MiniMap
+              nodeStrokeColor={(n) => {
+                if (n.selected) return '#e94560';
+                if (n.data?.status === 'working') return '#f39c12';
+                if (n.data?.status === 'done') return '#2ecc71';
+                return '#533483';
+              }}
+              nodeColor={(n) => {
+                if (n.data?.status === 'working') return '#f39c12';
+                if (n.data?.status === 'done') return '#2ecc71';
+                return '#0f3460';
+              }}
+              maskColor="rgba(0,0,0,0.3)"
+              pannable
+              zoomable
+              ariaLabel="Canvas minimap"
+            />
+          </ReactFlow>
+        </div>
+      </ReactFlowProvider>
+    </div>
+  );
+}
+
+// ── Render ──
+const container = document.getElementById('canvas-container');
+const root = ReactDOM.createRoot(container);
+root.render(React.createElement(CanvasApp));
+
+// ── Theme ──
+window.setTheme = (theme) => {
+  document.documentElement.setAttribute('data-theme', theme);
+};
+
+// ── Persistence test ──
+window.__persistenceTest = {
+  save: () => {
+    const state = window.__rf?.toObject();
+    if (state) {
+      localStorage.setItem('canvas-poc-state', JSON.stringify(state));
+      return 'saved';
+    }
+    return 'no instance';
+  },
+  load: () => {
+    const saved = localStorage.getItem('canvas-poc-state');
+    if (saved) return JSON.parse(saved);
+    return null;
+  },
+  clear: () => {
+    localStorage.removeItem('canvas-poc-state');
+  }
+};
+
+console.log('=== React Flow PoC Loaded ===');
+console.log('Commands:');
+console.log('  addNodes(N)    — Add N random nodes');
+console.log('  resetNodes()   — Reset to 30 nodes');
+console.log('  __persistenceTest.save() — Save layout');
+console.log('  __persistenceTest.load() — Load layout');
+console.log(`  Initial nodes: 30`);
+console.log(`  Theme: dark (toggle via toolbar dropdown)`);
+</script>
+</body>
+</html>

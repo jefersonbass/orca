@@ -37,10 +37,12 @@ import { createCommitMessageGenerationSlice } from './slices/commit-message-gene
 import { createPinnedTabCloseConfirmSlice } from './slices/pinned-tab-close-confirm'
 import { createOrcaProfilesSlice } from './slices/orca-profiles'
 import { createNewIssueDraftSlice } from './slices/new-issue-draft'
+import { createCanvasSlice } from './slices/canvas'
 import { e2eConfig } from '@/lib/e2e-config'
 import { registerHttpLinkStoreAccessor } from '@/lib/http-link-routing'
 
 export const useAppStore = create<AppState>()((...a) => ({
+  ...createCanvasSlice()(...a),
   ...createRepoSlice(...a),
   ...createSparsePresetsSlice(...a),
   ...createWorktreeSlice(...a),

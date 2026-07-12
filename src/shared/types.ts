@@ -3236,6 +3236,7 @@ export type TopLevelView =
   | 'automations'
   | 'space'
   | 'skills'
+  | 'canvas'
   | 'mobile'
 
 export type PersistedUIState = {
