@@ -12,11 +12,31 @@ test.describe('Spatial Canvas', () => {
     await expect.poll(() => getStoreState<string>(orcaPage, 'activeView')).toBe('canvas')
     await expect(orcaPage.getByRole('toolbar', { name: 'Canvas controls' })).toBeVisible()
 
-    await orcaPage.getByRole('button', { name: 'Add node menu' }).click()
-    await orcaPage.getByRole('button', { name: 'Add Note' }).click()
-    await expect(orcaPage.getByRole('textbox', { name: 'Note: Note' })).toBeVisible()
+    await orcaPage.getByRole('button', { name: 'Add node' }).click()
+    await orcaPage.getByRole('menuitem', { name: 'Add Note' }).click()
+    await expect
+      .poll(() =>
+        orcaPage.evaluate(
+          () => window.__store?.getState().canvasDocument?.nodes.filter((node) => node.type === 'note').length
+        )
+      )
+      .toBe(1)
+    await expect(orcaPage.locator('.react-flow__node')).toHaveCount(1)
+    const renderedNode = orcaPage.locator('.react-flow__node').first()
+    await orcaPage.getByRole('button', { name: 'Fit view', exact: true }).click()
+    const nodeBox = await renderedNode.evaluate((element) => {
+      const style = getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      return { width: rect.width, height: rect.height, display: style.display, visibility: style.visibility, opacity: style.opacity, cssText: (element as HTMLElement).style.cssText }
+    })
+    if (nodeBox.width === 0 || nodeBox.height === 0 || nodeBox.visibility === 'hidden') {
+      throw new Error(`Hidden canvas node: ${JSON.stringify(nodeBox)}`)
+    }
+    await expect(renderedNode).toBeVisible()
+    const noteCard = orcaPage.locator('[aria-label="Note: Note"]')
+    await expect(noteCard).toBeVisible()
 
-    await orcaPage.getByRole('textbox', { name: 'Note: Note' }).dblclick()
+    await noteCard.dblclick()
     const editor = orcaPage.getByRole('textbox', { name: 'Note content' })
     await editor.fill('Feature specification from Electron E2E')
     await editor.press('Tab')
@@ -33,7 +53,7 @@ test.describe('Spatial Canvas', () => {
       store.setState({ activeWorkspaceKey: 'worktree:e2e-other', activeWorktreeId: 'e2e-other' })
       store.getState().activateCanvasWorkspace()
     })
-    await expect(orcaPage.getByRole('textbox', { name: 'Note: Note' })).toHaveCount(0)
+    await expect(orcaPage.locator('[aria-label="Note: Note"]')).toHaveCount(0)
 
     await orcaPage.evaluate((key) => {
       const store = window.__store

@@ -119,6 +119,8 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     id: docNode.id,
     type: docNode.type,
     position: docNode.position,
+    width: docNode.size.width,
+    height: docNode.size.height,
     data: { ...docNode, ...docNode.metadata } as any,
     selected: false,
   }))
@@ -138,6 +140,7 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   useEffect(() => {
     setFlowNodes(canvasDocumentNodes.map((docNode) => ({
       id: docNode.id, type: docNode.type, position: docNode.position,
+      width: docNode.size.width, height: docNode.size.height,
       data: { ...docNode, ...docNode.metadata } as any, selected: false
     })))
   }, [canvasDocumentNodes, setFlowNodes])

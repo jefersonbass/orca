@@ -306,7 +306,14 @@ export const test = base.extend<OrcaTestFixtures, OrcaWorkerFixtures>({
               return false
             }
             await store.getState().fetchRepos()
-            const repo = store.getState().repos.find((candidate) => candidate.path === repoPath)
+            const normalizePath = (value: string) =>
+              value.replace(/\\/g, '/').replace(/\/+$/g, '').toLowerCase()
+            const expectedPath = normalizePath(repoPath)
+            const repo = store
+              .getState()
+              .repos.find(
+                (candidate) => normalizePath(candidate.path) === expectedPath
+              )
             if (!repo) {
               return false
             }
@@ -350,7 +357,14 @@ export const test = base.extend<OrcaTestFixtures, OrcaWorkerFixtures>({
             if (!store) {
               return 0
             }
-            const repo = store.getState().repos.find((candidate) => candidate.path === repoPath)
+            const normalizePath = (value: string) =>
+              value.replace(/\\/g, '/').replace(/\/+$/g, '').toLowerCase()
+            const expectedPath = normalizePath(repoPath)
+            const repo = store
+              .getState()
+              .repos.find(
+                (candidate) => normalizePath(candidate.path) === expectedPath
+              )
             if (!repo) {
               return 0
             }
