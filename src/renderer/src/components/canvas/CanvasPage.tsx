@@ -15,6 +15,8 @@ import type { TuiAgent } from '../../../../shared/types'
 import type { AddNodeType } from './CanvasToolbar'
 import { CANVAS_DRAW_TO_ADD_NODE, type CanvasTool } from './canvas-tool-types'
 import { exportCanvasPng, exportCanvasSvg } from './canvas-export'
+import { allowedBindingKinds, createOperationalBinding } from './canvas-operational-graph'
+import { autoDeliverContextBinding } from './canvas-orchestration-runtime'
 
 const LEGACY_STORAGE_KEY = 'orca-canvas-document'
 
@@ -40,6 +42,8 @@ const CanvasPageInner: React.FC = () => {
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   const activeRepoId = useAppStore((s) => s.activeRepoId)
   const agentStatusByPaneKey = useAppStore((s) => s.agentStatusByPaneKey)
+  const addCanvasBinding = useAppStore((s) => s.addCanvasBinding)
+  const removeCanvasBinding = useAppStore((s) => s.removeCanvasBinding)
   const reactFlowRef = useRef<any>(null)
   const [rfReady, setRfReady] = useState(false)
   const [activeTool, setActiveTool] = useState<CanvasTool>('select')
@@ -322,8 +326,27 @@ const CanvasPageInner: React.FC = () => {
         ...storeCanvasDocument,
         edges: [...(storeCanvasDocument.edges ?? []), edge],
       })
+
+      // A canvas edge between operational nodes is also its executable route.
+      // Previously this created only a visual React Flow edge, leaving the
+      // orchestration runtime with no binding to deliver.
+      const source = storeCanvasDocument.nodes.find((node) => node.id === edge.sourceNodeId)
+      const target = storeCanvasDocument.nodes.find((node) => node.id === edge.targetNodeId)
+      if (!source || !target) return
+      const kind = allowedBindingKinds(source.type, target.type)[0]
+      if (!kind) return
+      const orchestration = useAppStore.getState().canvasOrchestration
+      const alreadyBound = orchestration.bindings.some((binding) => {
+        if (binding.kind === 'context') return kind === 'context' && binding.sourceNodeId === source.id && binding.targetAgentNodeId === target.id
+        if (binding.kind === 'output') return kind === 'output' && binding.sourceAgentNodeId === source.id && binding.targetNoteNodeId === target.id
+        return (kind === 'delegation' || kind === 'reporting') && binding.kind === kind && binding.sourceAgentNodeId === source.id && binding.targetAgentNodeId === target.id
+      })
+      if (alreadyBound) return
+      const binding = createOperationalBinding({ kind, sourceNodeId: source.id, targetNodeId: target.id })
+      addCanvasBinding(binding)
+      if (binding.kind === 'context') autoDeliverContextBinding(binding)
     },
-    [storeCanvasDocument, setCanvasDocument]
+    [addCanvasBinding, setCanvasDocument, storeCanvasDocument]
   )
 
   // ── Edge deletion ──
@@ -332,13 +355,24 @@ const CanvasPageInner: React.FC = () => {
     const edges = storeCanvasDocument.edges ?? []
     const edge = edges.find((e) => e.id === edgeIdToDelete)
     if (edge) useAppStore.getState().pushUndo({ type: 'remove-edge', edge })
+    if (edge) {
+      const orchestration = useAppStore.getState().canvasOrchestration
+      orchestration.bindings.forEach((binding) => {
+        const matches = binding.kind === 'context'
+          ? binding.sourceNodeId === edge.sourceNodeId && binding.targetAgentNodeId === edge.targetNodeId
+          : binding.kind === 'output'
+            ? binding.sourceAgentNodeId === edge.sourceNodeId && binding.targetNoteNodeId === edge.targetNodeId
+            : binding.sourceAgentNodeId === edge.sourceNodeId && binding.targetAgentNodeId === edge.targetNodeId
+        if (matches) removeCanvasBinding(binding.id)
+      })
+    }
     setCanvasDocument({
       ...storeCanvasDocument,
       edges: edges.filter((e) => e.id !== edgeIdToDelete),
     })
     setEdgeCtx(null)
     setNodeCtx(null)
-  }, [storeCanvasDocument, setCanvasDocument])
+  }, [removeCanvasBinding, setCanvasDocument, storeCanvasDocument])
 
   // ── Edge type change ──
   const handleChangeEdgeType = useCallback(

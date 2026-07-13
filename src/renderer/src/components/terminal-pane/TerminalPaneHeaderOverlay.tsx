@@ -32,6 +32,7 @@ type TerminalPaneHeaderOverlayProps = {
   paneTitleBackground: string
   terminalContentVisible: boolean
   hiddenStartupStyle: CSSProperties
+  showSplitActions?: boolean
   managerRef: RefObject<PaneManager | null>
   paneTransportsRef: RefObject<Map<number, PtyTransport>>
   /** When true, this pane can toggle the native chat view; renders a chat/terminal
@@ -72,6 +73,7 @@ export default function TerminalPaneHeaderOverlay({
   paneTitleBackground,
   terminalContentVisible,
   hiddenStartupStyle,
+  showSplitActions = true,
   managerRef,
   paneTransportsRef,
   canToggleNativeChat,
@@ -272,7 +274,7 @@ export default function TerminalPaneHeaderOverlay({
                       </TooltipContent>
                     </Tooltip>
                   ) : null}
-                  {showAlwaysOnHeaders ? (
+                  {showAlwaysOnHeaders && showSplitActions ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button

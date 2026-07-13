@@ -107,7 +107,7 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
         {/* Portal target — xterm surface renders here */}
         <div
           ref={portalRef}
-          className="relative flex h-[calc(100%-32px)] w-full min-h-0 items-center justify-center"
+          className="nodrag nopan nowheel relative flex h-[calc(100%-32px)] w-full min-h-0 items-center justify-center"
           onClick={handleFocus}
           data-pane-key={paneKey}
         >

@@ -238,6 +238,7 @@ const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
       // flag still lets hidden tabs throttle rendering.
       isVisible={isVisible || activityTerminalPortal !== null || canvasTerminalPortal !== null}
       isWorktreeActive={isWorktreeActive || activityTerminalPortal !== null || canvasTerminalPortal !== null}
+      embeddedInCanvas={canvasTerminalPortal !== null}
       isolatedPaneKey={activityTerminalPortal?.paneKey ?? null}
       onPtyExit={(ptyId) => {
         if (consumeSuppressedPtyExit(ptyId)) {

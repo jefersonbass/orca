@@ -41,6 +41,20 @@ function referenceForAgentNode(nodeId: string): CanvasAgentReference | null {
       captureMode: ref.captureMode
     }
   }
+  // Agents created from the Canvas dialog initially point at their terminal
+  // tab. The live agent-status index is the authoritative source for the
+  // pane/session/provider that appears after the CLI starts, so preserve the
+  // tab identity here instead of treating the node as an unbound terminal.
+  if (ref?.kind === 'terminal-tab' && node?.type === 'agent-terminal') {
+    const provider = typeof node.metadata?.agent === 'string' ? node.metadata.agent : 'unknown'
+    return {
+      agentSessionId: '',
+      terminalTabId: ref.tabId,
+      provider,
+      worktreeId: ref.worktreeId,
+      captureMode: 'native-transcript'
+    }
+  }
   return null
 }
 
@@ -64,6 +78,41 @@ export function prepareDelegationDelivery(binding: DelegationBinding, content: s
   const message = transitionCanvasMessage(draft, 'awaiting-approval', 'user')
   persistWorkflowMessage(message)
   return message
+}
+
+function contextMessageForBinding(binding: ContextBinding): AgentCanvasMessage | undefined {
+  return useAppStore.getState().canvasOrchestration.messages.find((message) =>
+    message.type === 'instruction' &&
+    message.toAgentId === binding.targetAgentNodeId &&
+    message.contextRefs.some((reference) => reference.nodeId === binding.sourceNodeId)
+  )
+}
+
+/**
+ * A context link is useful only when the target agent actually receives the
+ * note. Creating a visual edge therefore queues and delivers the first
+ * context snapshot automatically. A short retry window covers the normal
+ * launch race where the CLI tab exists before its agent hook reports a live
+ * session.
+ */
+export function autoDeliverContextBinding(binding: ContextBinding, attempt = 0): void {
+  const existing = contextMessageForBinding(binding)
+  if (existing && ['queued', 'delivering', 'delivered', 'acknowledged'].includes(existing.deliveryState)) {
+    return
+  }
+  const message = existing?.deliveryState === 'awaiting-approval'
+    ? existing
+    : prepareContextDelivery(binding)
+
+  void deliverApprovedCanvasMessage(message.id).then(() => {
+    const latest = contextMessageForBinding(binding)
+    if (attempt >= 8 || latest?.deliveryState !== 'failed') return
+    window.setTimeout(() => autoDeliverContextBinding(binding, attempt + 1), 1_500)
+  }).catch(() => {
+    if (attempt < 8) {
+      window.setTimeout(() => autoDeliverContextBinding(binding, attempt + 1), 1_500)
+    }
+  })
 }
 
 export async function deliverApprovedCanvasMessage(messageIdToDeliver: string): Promise<void> {

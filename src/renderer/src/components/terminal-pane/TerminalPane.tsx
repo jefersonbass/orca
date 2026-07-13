@@ -203,6 +203,8 @@ type TerminalPaneProps = {
   isActive: boolean
   isVisible?: boolean
   isWorktreeActive?: boolean
+  /** Canvas portals are embedded inside React Flow nodes, not a tab group. */
+  embeddedInCanvas?: boolean
   // Why: when set (Activity portal), this pane visually isolates the given
   // split pane so only that leaf is shown. Implemented as a transient layout
   // override (separate snapshot ref) — does NOT touch expandedPaneId state
@@ -274,6 +276,7 @@ export default function TerminalPane({
   isActive,
   isVisible = true,
   isWorktreeActive = isVisible,
+  embeddedInCanvas = false,
   isolatedPaneKey = null,
   onPtyExit,
   onCloseTab
@@ -2957,13 +2960,21 @@ export default function TerminalPane({
     <>
       <div
         ref={setContainerRef}
-        className="absolute inset-0 min-h-0 min-w-0"
+        className={`absolute inset-0 min-h-0 min-w-0${embeddedInCanvas ? ' nodrag nopan nowheel' : ''}`}
         data-native-file-drop-target="terminal"
         data-terminal-tab-id={tabId}
         data-terminal-layout-leaf-ids={expectedLayoutLeafIdsAttr}
         data-pane-title-surface={titleUsesLightSurface ? 'light' : 'dark'}
         style={terminalContainerStyle}
         onContextMenuCapture={contextMenu.onContextMenuCapture}
+        // React Flow must not interpret text selection/clicks inside an
+        // embedded terminal as node dragging or marquee selection. Bubble
+        // guards run after xterm receives the event, preserving terminal
+        // selection and keyboard focus while stopping the canvas parent.
+        onPointerDown={embeddedInCanvas ? (event) => event.stopPropagation() : undefined}
+        onPointerMove={embeddedInCanvas ? (event) => event.stopPropagation() : undefined}
+        onMouseDown={embeddedInCanvas ? (event) => event.stopPropagation() : undefined}
+        onWheel={embeddedInCanvas ? (event) => event.stopPropagation() : undefined}
         onMouseDownCapture={handlePrimarySelectionMiddleMouseDown}
         onAuxClickCapture={handlePrimarySelectionAuxClick}
         onDragOver={(e) => {
@@ -3154,6 +3165,7 @@ export default function TerminalPane({
         isChatViewMode={activePaneIsChatLeaf}
         onToggleNativeChat={handleToggleNativeChat}
         onSplitPane={splitTerminalPaneFromHeader}
+        showSplitActions={!embeddedInCanvas}
         onBeginPaneDrag={beginPaneDragFromHeader}
         onActivatePaneTitleInteraction={activatePaneTitleInteraction}
         onPaneTitleContextMenu={contextMenu.onPaneTitleContextMenu}
