@@ -78,7 +78,7 @@ export function resolveCanvasAgent(
     ...(entry.providerSession?.transcriptPath
       ? { transcriptPath: entry.providerSession.transcriptPath }
       : {}),
-    captureMode: ref.captureMode ?? 'native-transcript'
+    captureMode: ref.captureMode ?? (provider === 'opencode' ? 'terminal-scrape' : 'native-transcript')
   }
 }
 
@@ -247,5 +247,17 @@ function formatAgentInstruction(message: AgentCanvasMessage): string {
         `- ${ref.resourceType}: ${ref.nodeId}${ref.snapshotHash ? ` (hash: ${ref.snapshotHash})` : ''}`
       ).join('\n')}`
     : ''
-  return `[${heading} from ${message.fromAgentId ?? 'user'}]\n\n${message.content}${context}`
+  const state = useAppStore.getState()
+  const routes = state.canvasOrchestration.bindings
+    .filter((binding) => binding.enabled)
+    .flatMap((binding) => {
+      if (binding.kind !== 'delegation' && binding.kind !== 'reporting') return []
+      if (binding.sourceAgentNodeId !== message.toAgentId) return []
+      const target = state.canvasDocument?.nodes.find((node) => node.id === binding.targetAgentNodeId)
+      return [`- ${target?.label ?? binding.targetAgentNodeId} (${binding.targetAgentNodeId}) via ${binding.kind}`]
+    })
+  const routeContext = routes.length > 0
+    ? `\n\nCanvas orchestration routes available from this agent:\n${routes.join('\n')}\nUse the linked route when this instruction asks you to delegate or report work; the target node id is included above.`
+    : ''
+  return `[${heading} from ${message.fromAgentId ?? 'user'}]\n\n${message.content}${context}${routeContext}`
 }

@@ -66,6 +66,30 @@ const CanvasPageInner: React.FC = () => {
     }
   }, [activateCanvasWorkspace, activeRepoId, activeWorkspaceKey, activeWorktreeId, setCanvasDocument])
 
+  // Older canvas documents persisted the React Flow edge but not the
+  // executable orchestration binding. Rehydrate those bindings on load so a
+  // note-to-agent or agent-to-agent link is functional after restarting Orca.
+  useEffect(() => {
+    if (!storeCanvasDocument) return
+    const orchestration = useAppStore.getState().canvasOrchestration
+    for (const edge of storeCanvasDocument.edges ?? []) {
+      const source = storeCanvasDocument.nodes.find((node) => node.id === edge.sourceNodeId)
+      const target = storeCanvasDocument.nodes.find((node) => node.id === edge.targetNodeId)
+      if (!source || !target) continue
+      const kind = allowedBindingKinds(source.type, target.type)[0]
+      if (!kind) continue
+      const alreadyBound = orchestration.bindings.some((binding) => {
+        if (binding.kind === 'context') return kind === 'context' && binding.sourceNodeId === source.id && binding.targetAgentNodeId === target.id
+        if (binding.kind === 'output') return kind === 'output' && binding.sourceAgentNodeId === source.id && binding.targetNoteNodeId === target.id
+        return (kind === 'delegation' || kind === 'reporting') && binding.kind === kind && binding.sourceAgentNodeId === source.id && binding.targetAgentNodeId === target.id
+      })
+      if (alreadyBound) continue
+      const binding = createOperationalBinding({ kind, sourceNodeId: source.id, targetNodeId: target.id })
+      addCanvasBinding(binding)
+      if (binding.kind === 'context') autoDeliverContextBinding(binding)
+    }
+  }, [addCanvasBinding, storeCanvasDocument])
+
   const syncDoc = useCallback(
     (updater: (doc: NonNullable<typeof storeCanvasDocument>) => typeof storeCanvasDocument) => {
       if (!storeCanvasDocument) return

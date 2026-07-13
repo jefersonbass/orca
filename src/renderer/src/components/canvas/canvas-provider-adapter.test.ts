@@ -21,4 +21,23 @@ describe('resolveCanvasAgent', () => {
       captureMode: 'native-transcript'
     })
   })
+
+  it('resolves an OpenCode terminal through scrape when hooks are unavailable', () => {
+    const resolved = resolveCanvasAgent({
+      agentSessionId: 'canvas-tab:tab-1',
+      paneKey: 'tab-1',
+      terminalTabId: 'tab-1',
+      provider: 'opencode',
+      captureMode: 'terminal-scrape'
+    }, {})
+
+    expect(resolved).toMatchObject({
+      ok: true,
+      sessionId: 'canvas-tab:tab-1',
+      paneKey: 'tab-1',
+      tabId: 'tab-1',
+      provider: 'opencode',
+      captureMode: 'terminal-scrape'
+    })
+  })
 })

@@ -78,11 +78,15 @@ function referenceForAgentNode(nodeId: string): CanvasAgentReference | null {
   ) {
     const provider = typeof node.metadata?.agent === 'string' ? node.metadata.agent : 'unknown'
     return {
-      agentSessionId: '',
+      // A live terminal can be addressed before its provider publishes a
+      // native session record. OpenCode is supported through terminal scrape
+      // in that state, so keep a stable synthetic identity for delivery.
+      agentSessionId: `canvas-tab:${ref.tabId}`,
       terminalTabId: ref.tabId,
+      paneKey: ref.tabId,
       provider,
       worktreeId: ref.worktreeId,
-      captureMode: 'native-transcript'
+      captureMode: 'terminal-scrape'
     }
   }
   return null
