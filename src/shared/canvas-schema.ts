@@ -15,7 +15,7 @@ const resourceReferenceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('terminal-tab'), tabId: z.string(), worktreeId: z.string() }),
   z.object({ kind: z.literal('agent-pane'), tabId: z.string(), leafId: z.string().optional(), worktreeId: z.string(), paneKey: z.string().optional() }),
   z.object({ kind: z.literal('live-terminal'), paneKey: z.string(), sessionId: z.string().optional() }),
-  z.object({ kind: z.literal('agent-terminal'), paneKey: z.string(), provider: z.string().optional(), sessionId: z.string().optional() }),
+  z.object({ kind: z.literal('agent-terminal'), paneKey: z.string(), provider: z.string().optional(), sessionId: z.string().optional(), transcriptPath: z.string().optional(), captureMode: z.enum(['native-transcript', 'terminal-scrape']).optional() }),
   z.object({ kind: z.literal('file'), worktreeId: z.string(), relativePath: z.string() }),
   z.object({ kind: z.literal('folder'), worktreeId: z.string(), relativePath: z.string() }),
   z.object({ kind: z.literal('diff'), worktreeId: z.string(), diffId: z.string() }),

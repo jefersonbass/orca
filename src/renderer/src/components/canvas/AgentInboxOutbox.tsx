@@ -50,7 +50,8 @@ export const AgentInboxOutbox: React.FC<AgentInboxOutboxProps> = React.memo(({
         )}
 
         {(tab === 'inbox' ? inboxMessages : outboxMessages).map((msg) => (
-          <div key={msg.id} className="mb-2 rounded-lg border border-worktree-sidebar-border bg-worktree-sidebar/50 p-3 text-[12px]">
+          <div key={msg.id} data-testid="canvas-message-card" data-message-id={msg.id}
+            className="mb-2 rounded-lg border border-worktree-sidebar-border bg-worktree-sidebar/50 p-3 text-[12px]">
             <div className="flex items-center justify-between">
               <span className="font-medium text-worktree-sidebar-foreground/70">{msg.type}</span>
               <DeliveryStateBadge state={msg.deliveryState} />
@@ -69,12 +70,14 @@ export const AgentInboxOutbox: React.FC<AgentInboxOutboxProps> = React.memo(({
               <div className="mt-2 flex gap-2">
                 <button
                   onClick={() => onApproveMessage(msg.id)}
+                  aria-label={`Approve message ${msg.id}`}
                   className="rounded bg-green-600 px-3 py-1 text-[11px] text-white hover:bg-green-500"
                 >
                   Approve
                 </button>
                 <button
                   onClick={() => onRejectMessage(msg.id)}
+                  aria-label={`Reject message ${msg.id}`}
                   className="rounded bg-red-600 px-3 py-1 text-[11px] text-white hover:bg-red-500"
                 >
                   Reject
@@ -85,6 +88,7 @@ export const AgentInboxOutbox: React.FC<AgentInboxOutboxProps> = React.memo(({
             {tab === 'outbox' && msg.deliveryState === 'failed' && (
               <button
                 onClick={() => onRetryMessage(msg.id)}
+                aria-label={`Retry message ${msg.id}`}
                 className="mt-2 rounded bg-yellow-600 px-3 py-1 text-[11px] text-white hover:bg-yellow-500"
               >
                 Retry

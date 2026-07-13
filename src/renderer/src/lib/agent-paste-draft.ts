@@ -32,7 +32,11 @@ export {
 // line-edit shortcuts. Callers choose whether to append Enter after the paste.
 export const BRACKETED_PASTE_BEGIN = BRACKETED_PASTE_START
 export { BRACKETED_PASTE_END }
-export const POST_PASTE_SUBMIT_DELAY_MS = 50
+// Codex 0.144 can still be applying a bracketed paste when Enter arrives at
+// 50ms, especially for orchestration prompts sent to a background pane. 100ms
+// matches the proven interactive path and prevents an accepted PTY write from
+// leaving the prompt stranded in the composer.
+export const POST_PASTE_SUBMIT_DELAY_MS = 100
 
 export function sanitizeBracketedPasteContent(content: string): string {
   return sanitizeTerminalPasteText(content)

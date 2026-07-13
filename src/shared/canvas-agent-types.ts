@@ -7,6 +7,8 @@ export type CanvasAgentReference = {
   provider: string
   model?: string
   worktreeId?: string
+  transcriptPath?: string
+  captureMode?: 'native-transcript' | 'terminal-scrape'
 }
 
 // ── Operational Bindings ──

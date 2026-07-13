@@ -147,7 +147,12 @@ export async function attachRepoAndOpenTerminal(page: Page, repoPath: string): P
     if (!store) {
       return null
     }
-    const repo = store.getState().repos.find((candidate) => candidate.path === repoPath)
+    const normalizePath = (value: string) =>
+      value.replace(/\\/g, '/').replace(/\/+$/g, '').toLowerCase()
+    const expectedPath = normalizePath(repoPath)
+    const repo = store.getState().repos.find(
+      (candidate) => normalizePath(candidate.path) === expectedPath
+    )
     if (!repo) {
       return null
     }

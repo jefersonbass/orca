@@ -29,7 +29,7 @@ export type CanvasResourceReference =
   | { kind: 'terminal-tab'; tabId: string; worktreeId: string }
   | { kind: 'agent-pane'; tabId: string; leafId?: string; worktreeId: string; paneKey?: string }
   | { kind: 'live-terminal'; paneKey: string; sessionId?: string }
-  | { kind: 'agent-terminal'; paneKey: string; provider?: string; sessionId?: string }
+  | { kind: 'agent-terminal'; paneKey: string; provider?: string; sessionId?: string; transcriptPath?: string; captureMode?: 'native-transcript' | 'terminal-scrape' }
   | { kind: 'file'; worktreeId: string; relativePath: string }
   | { kind: 'folder'; worktreeId: string; relativePath: string }
   | { kind: 'diff'; worktreeId: string; diffId: string }

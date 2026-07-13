@@ -32,7 +32,14 @@ function referenceForAgentNode(nodeId: string): CanvasAgentReference | null {
     }
   }
   if (ref?.kind === 'agent-terminal') {
-    return { agentSessionId: ref.sessionId ?? '', paneKey: ref.paneKey, provider: ref.provider ?? 'unknown' }
+    return {
+      agentSessionId: ref.sessionId ?? '',
+      terminalTabId: ref.paneKey.split(':')[0],
+      paneKey: ref.paneKey,
+      provider: ref.provider ?? 'unknown',
+      transcriptPath: ref.transcriptPath,
+      captureMode: ref.captureMode
+    }
   }
   return null
 }
