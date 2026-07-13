@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand'
 import type { AppState } from '../types'
-import type { CanvasDocument, CanvasUndoStack } from '../../../../shared/canvas-types'
+import { normalizeCanvasDocument, type CanvasDocument, type CanvasUndoStack } from '../../../../shared/canvas-types'
 import type { WorkspaceSessionState } from '../../../../shared/types'
 import type { AgentCanvasMessage, CanvasAgentTask, CanvasOperationalBinding, CanvasWorkspaceOrchestration, CollaborationSession } from '../../../../shared/canvas-agent-types'
 import { worktreeWorkspaceKey } from '../../../../shared/workspace-scope'
@@ -78,11 +78,12 @@ export function createCanvasSlice(): StateCreator<AppState, [], [], CanvasSlice>
           delete next[key]
           return { canvasDocument: null, canvasDocumentsByWorkspaceKey: next }
         }
+        const normalized = normalizeCanvasDocument(doc)
         return {
-          canvasDocument: doc,
+          canvasDocument: normalized,
           canvasOrchestration: state.canvasOrchestrationByWorkspaceKey[key] ?? EMPTY_ORCHESTRATION,
           activeCanvasWorkspaceKey: key,
-          canvasDocumentsByWorkspaceKey: { ...state.canvasDocumentsByWorkspaceKey, [key]: doc }
+          canvasDocumentsByWorkspaceKey: { ...state.canvasDocumentsByWorkspaceKey, [key]: normalized }
         }
       }),
     clearCanvasDocument: () => get().setCanvasDocument(null),
@@ -100,7 +101,9 @@ export function createCanvasSlice(): StateCreator<AppState, [], [], CanvasSlice>
         }
       }),
     hydrateCanvasSession: (session) => set({
-      canvasDocumentsByWorkspaceKey: session.canvasDocumentsByWorkspaceKey ?? {},
+      canvasDocumentsByWorkspaceKey: Object.fromEntries(
+        Object.entries(session.canvasDocumentsByWorkspaceKey ?? {}).map(([key, value]) => [key, normalizeCanvasDocument(value)])
+      ),
       canvasOrchestrationByWorkspaceKey: Object.fromEntries(
         Object.entries(session.canvasOrchestrationByWorkspaceKey ?? {}).map(([key, value]) => [
           key,

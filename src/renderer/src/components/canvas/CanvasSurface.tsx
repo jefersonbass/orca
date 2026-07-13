@@ -94,6 +94,13 @@ const edgeTypes = {
   'owned-by': SemanticEdge,
 }
 
+const CANVAS_SNAP_GRID: [number, number] = [20, 20]
+const CANVAS_DEFAULT_EDGE_OPTIONS = {
+  type: 'default',
+  style: { stroke: '#60a5fa', strokeWidth: 2.5 },
+}
+const CANVAS_CONNECTION_LINE_STYLE = { stroke: '#60a5fa', strokeWidth: 3 }
+
 const CanvasEdgeOverlay: React.FC<{ nodes: CanvasNodeDocument[]; edges: CanvasEdgeDocument[] }> = ({ nodes, edges }) => (
   <ViewportPortal>
     <svg className="pointer-events-none absolute left-0 top-0 size-px overflow-visible" aria-label="Canvas connections">
@@ -159,6 +166,11 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   const reactFlowInstanceRef = useRef<any>(null)
   const pendingClickSourceRef = useRef<string | null>(null)
   const [isDark, setIsDark] = useState(true)
+  const onEdgeCreatedRef = useRef(onEdgeCreated)
+
+  useEffect(() => {
+    onEdgeCreatedRef.current = onEdgeCreated
+  }, [onEdgeCreated])
 
   // Detect theme from CSS custom property
   useEffect(() => {
@@ -382,14 +394,25 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
       type: 'default',
       data: { relationship: 'depends-on', createdBy: 'user', timestamp: now },
     }, edges))
-    onEdgeCreated?.({
+    onEdgeCreatedRef.current?.({
       id: edgeId,
       sourceNodeId: source,
       targetNodeId: target,
       relationship: 'depends-on',
       type: 'depends-on',
     })
-  }, [onEdgeCreated, setFlowEdges])
+  }, [setFlowEdges])
+
+  const handleConnect = useCallback((connection: any) => {
+    setConnecting(false)
+    if (!connection.source || !connection.target) return
+    createEdge(connection.source, connection.target)
+  }, [createEdge])
+
+  const handleConnectStart = useCallback(() => setConnecting(true), [])
+  const handleConnectEnd = useCallback(() => {
+    if (!pendingClickSourceRef.current) setConnecting(false)
+  }, [])
 
   useEffect(() => {
     const applyClickConnection = (detail: { nodeId: string; handleType: 'source' | 'target' }) => {
@@ -437,7 +460,7 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     minZoom: 0.1,
     maxZoom: 5,
     snapToGrid: true,
-    snapGrid: [20, 20],
+    snapGrid: CANVAS_SNAP_GRID,
     nodesResizable: true,
     nodesFocusable: true,
     edgesFocusable: true,
@@ -470,15 +493,11 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
       event.preventDefault()
       onEdgeContextMenu?.({ edgeId: edge.id, x: event.clientX, y: event.clientY })
     },
-    onConnect: (connection: any) => {
-      setConnecting(false)
-      if (!connection.source || !connection.target) return
-      createEdge(connection.source, connection.target)
-    },
-    onConnectStart: () => setConnecting(true),
-    onConnectEnd: () => { if (!pendingClickSourceRef.current) setConnecting(false) },
-    defaultEdgeOptions: { type: 'default', style: { stroke: '#60a5fa', strokeWidth: 2.5 } },
-    connectionLineStyle: { stroke: '#60a5fa', strokeWidth: 3 },
+    onConnect: handleConnect,
+    onConnectStart: handleConnectStart,
+    onConnectEnd: handleConnectEnd,
+    defaultEdgeOptions: CANVAS_DEFAULT_EDGE_OPTIONS,
+    connectionLineStyle: CANVAS_CONNECTION_LINE_STYLE,
     connectionLineType: 'bezier',
     colorMode: isDark ? 'dark' : 'light',
     className: 'canvas-flow',

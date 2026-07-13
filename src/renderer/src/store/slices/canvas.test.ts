@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseWorkspaceSession } from '../../../../shared/workspace-session-schema'
 import { worktreeWorkspaceKey } from '../../../../shared/workspace-scope'
-import type { CanvasDocument } from '../../../../shared/canvas-types'
+import { normalizeCanvasDocument, type CanvasDocument } from '../../../../shared/canvas-types'
 import { createTestStore } from './store-test-helpers'
 
 function documentWithLabel(label: string): CanvasDocument {
@@ -21,6 +21,25 @@ function documentWithLabel(label: string): CanvasDocument {
 }
 
 describe('CanvasSlice workspace ownership', () => {
+  it('normalizes legacy canvas state before React Flow receives it', () => {
+    const normalized = normalizeCanvasDocument({
+      viewport: { x: Number.NaN, y: 'bad', zoom: 99 },
+      nodes: [
+        { id: 'note', type: 'note', position: { x: 10 }, size: { width: 0 }, label: 'Recovered' },
+        { id: 'unknown', type: 'removed-node-type', position: {}, size: {}, label: 42 },
+      ],
+      edges: [
+        { id: 'valid', sourceNodeId: 'note', targetNodeId: 'unknown', type: 'depends-on' },
+        { id: 'orphan', sourceNodeId: 'missing', targetNodeId: 'note', type: 'visual' },
+      ],
+    })
+
+    expect(normalized.viewport).toEqual({ x: 0, y: 0, zoom: 5 })
+    expect(normalized.nodes.map((node) => node.type)).toEqual(['note', 'note'])
+    expect(normalized.nodes[0]?.size).toEqual({ width: 40, height: 100 })
+    expect(normalized.edges.map((edge) => edge.id)).toEqual(['valid'])
+  })
+
   it('keeps documents isolated when the active workspace changes', () => {
     const store = createTestStore()
     store.setState({ activeWorktreeId: 'workspace-a', activeWorkspaceKey: worktreeWorkspaceKey('workspace-a') })
