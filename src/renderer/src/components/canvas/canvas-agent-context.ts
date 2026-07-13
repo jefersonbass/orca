@@ -9,7 +9,7 @@ export type CanvasAgentContext = {
   serialized: string
 }
 
-function nodeText(node: CanvasNodeDocument): string {
+export function canvasNodeContextText(node: CanvasNodeDocument): string {
   const content = node.metadata?.content
   if (typeof content === 'string' && content.trim()) return content.trim()
   const text = node.metadata?.text
@@ -41,7 +41,7 @@ export function buildCanvasAgentContext(
   const noteEntries = activeBindings.flatMap((binding) => {
     if (binding.kind !== 'context' || binding.targetAgentNodeId !== agentNodeId) return []
     const source = document.nodes.find((node) => node.id === binding.sourceNodeId)
-    return [`${source?.label ?? binding.sourceNodeId} (${binding.sourceNodeId}): ${source ? nodeText(source) : 'missing canvas node'}`]
+    return [`${source?.label ?? binding.sourceNodeId} (${binding.sourceNodeId}): ${source ? canvasNodeContextText(source) : 'missing canvas node'}`]
   })
   const agentEntries = activeBindings.flatMap((binding) => {
     if (binding.kind !== 'delegation' && binding.kind !== 'reporting') return []

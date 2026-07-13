@@ -91,6 +91,10 @@ export async function sendInstruction(
   const timestamp = new Date().toISOString()
   try {
     const content = formatAgentInstruction(message)
+    const nativeDelivery = await sendThroughOrcaOrchestration(target, message, content, timestamp)
+    if (nativeDelivery) {
+      return nativeDelivery
+    }
     const leafId = target.paneKey.startsWith(`${target.tabId}:`)
       ? target.paneKey.slice(target.tabId.length + 1)
       : null
@@ -134,6 +138,84 @@ export async function sendInstruction(
     }
   } catch (error) {
     return { success: false, messageId: message.id, timestamp, error: String(error) }
+  }
+}
+
+/**
+ * Use the same main-process mailbox that native Orca agents use. The Canvas
+ * must not create a second communication universe: terminal handles, queued
+ * delivery and push-on-idle behavior are already owned by the runtime.
+ *
+ * A null result means this runtime does not expose the RPC (for example the
+ * browser fallback or an older packaged build); callers retain the existing
+ * renderer PTY path in that case.
+ */
+async function sendThroughOrcaOrchestration(
+  target: ResolvedCanvasAgent,
+  message: AgentCanvasMessage,
+  content: string,
+  timestamp: string
+): Promise<DeliveryResult | null> {
+  if (typeof window.api?.runtime?.call !== 'function') {
+    return null
+  }
+  try {
+    const listed = await window.api.runtime.call({
+      method: 'terminal.list',
+      params: { limit: 500 }
+    })
+    if (!listed.ok) {
+      return null
+    }
+
+    const result = listed.result as {
+      terminals?: { handle: string; tabId: string; leafId: string }[]
+    }
+    const targetLeafId = target.paneKey.startsWith(`${target.tabId}:`)
+      ? target.paneKey.slice(target.tabId.length + 1)
+      : undefined
+    const terminal = result.terminals?.find((candidate) =>
+      candidate.tabId === target.tabId &&
+      (targetLeafId === undefined || candidate.leafId === targetLeafId)
+    )
+    if (!terminal) {
+      return null
+    }
+
+    const sent = await window.api.runtime.call({
+      method: 'orchestration.send',
+      params: {
+        to: terminal.handle,
+        from: `canvas:${message.fromAgentId ?? 'user'}`,
+        subject: message.type === 'delegation' ? 'Canvas delegation' : 'Canvas context',
+        body: content,
+        type: message.type === 'delegation' ? 'dispatch' : 'status',
+        priority: 'high',
+        threadId: `canvas:${message.id}`,
+        payload: JSON.stringify({
+          canvasMessageId: message.id,
+          canvasNodeId: message.toAgentId,
+          contextRefs: message.contextRefs
+        })
+      }
+    })
+    if (!sent.ok) {
+      // A runtime may be reachable while its orchestration schema is older
+      // than the renderer. Fall back to the verified PTY path instead of
+      // losing the user instruction.
+      return null
+    }
+
+    return {
+      success: true,
+      messageId: message.id,
+      timestamp,
+      providerReceipt: `orca-orchestration:${terminal.handle}`
+    }
+  } catch {
+    // Older packaged builds and disconnected remote runtimes can reject the
+    // RPC. The renderer delivery path remains a safe compatibility fallback.
+    return null
   }
 }
 
@@ -237,7 +319,7 @@ export function nativeChatMessageText(message: NativeChatMessage): string {
     .trim()
 }
 
-function formatAgentInstruction(message: AgentCanvasMessage): string {
+export function formatAgentInstruction(message: AgentCanvasMessage): string {
   const heading = message.type === 'delegation'
     ? 'DELEGATION'
     : message.type === 'review-request'
@@ -261,7 +343,7 @@ function formatAgentInstruction(message: AgentCanvasMessage): string {
       return [`- ${target?.label ?? binding.targetAgentNodeId} (${binding.targetAgentNodeId}) via ${binding.kind}`]
     })
   const routeContext = routes.length > 0
-    ? `\n\nCanvas orchestration routes available from this agent:\n${routes.join('\n')}\nUse the linked route when this instruction asks you to delegate or report work; the target node id is included above.`
+    ? `\n\nCanvas orchestration routes available from this agent:\n${routes.join('\n')}\nUse the linked route when this instruction asks you to delegate or report work; the target node id is included above. To delegate autonomously, emit exactly <orca-delegate target="TARGET_NODE_ID">task for the linked agent</orca-delegate>. The Canvas runtime will deliver that block through the existing binding.`
     : ''
   const incomingContext = state.canvasOrchestration.bindings
     .filter((binding) => binding.enabled)

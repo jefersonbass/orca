@@ -4,6 +4,7 @@ import type { CanvasAgentReference, DelegationBinding, OutputBinding, ReportingB
 import type { CanvasNodeDocument } from '../../../../shared/canvas-types'
 import { readAgentMessageIds, resolveCanvasAgent, sendInstruction, waitForAgentResponse } from './canvas-provider-adapter'
 import { transitionCanvasMessage } from '../../../../shared/canvas-state-machines'
+import { parseCanvasDelegationRequests } from './canvas-delegation-protocol'
 import {
   activateTaskForDelivery,
   advanceSpecificationWorkflow,
@@ -123,6 +124,94 @@ function contextMessageForBinding(binding: ContextBinding): AgentCanvasMessage |
   )
 }
 
+const contextUpdateQueues = new Map<string, Promise<void>>()
+
+async function deliverCanvasContextUpdate(
+  binding: ContextBinding,
+  content: string,
+  attempt = 0
+): Promise<void> {
+  const store = useAppStore.getState()
+  const message = prepareContextDelivery(
+    binding,
+    undefined,
+    `[Canvas context update]\nThe linked ${binding.sourceNodeId} item changed. Treat this as the latest authoritative content and act on it if it contains an instruction.\n\n${content}`
+  )
+  const queued = transitionCanvasMessage(message, 'queued', 'system')
+  persistWorkflowMessage(queued)
+  const ref = referenceForAgentNode(binding.targetAgentNodeId)
+  const target = ref ? resolveCanvasAgent(ref, store.agentStatusByPaneKey) : { ok: false as const, error: 'Target agent node has no live resource reference' }
+  if (!target.ok) {
+    if (attempt < 8) {
+      window.setTimeout(() => { void deliverCanvasContextUpdate(binding, content, attempt + 1) }, 1_500)
+      return
+    }
+    persistWorkflowMessage({ ...transitionCanvasMessage(queued, 'failed', 'system'), deliveryError: target.error })
+    return
+  }
+
+  const baseline = await readAgentMessageIds(target).catch(() => new Set<string>())
+  const delivering = transitionCanvasMessage(queued, 'delivering', 'system')
+  persistWorkflowMessage(delivering)
+  const delivery = await sendInstruction(target, message)
+  if (!delivery.success) {
+    const failed = { ...transitionCanvasMessage(delivering, 'failed', 'system'), deliveryError: delivery.error }
+    persistWorkflowMessage(failed)
+    if (attempt < 8) {
+      window.setTimeout(() => { void deliverCanvasContextUpdate(binding, content, attempt + 1) }, 1_500)
+    }
+    return
+  }
+  const delivered = {
+    ...transitionCanvasMessage(delivering, 'delivered', 'system'),
+    providerReceipt: delivery.providerReceipt,
+    deliveredAt: delivery.timestamp
+  }
+  persistWorkflowMessage(transitionCanvasMessage(delivered, 'acknowledged', 'system'))
+  try {
+    const response = await waitForAgentResponse({ target, baselineMessageIds: baseline, timeoutMs: 30_000 })
+    dispatchCanvasDelegations(binding.targetAgentNodeId, response.content)
+  } catch {
+    // Context delivery remains acknowledged even when the provider is busy or
+    // does not emit a parseable assistant response for this update.
+  }
+}
+
+/** Broadcast a changed Canvas item to its already-linked agent without asking
+ * the user to copy/paste the note or approve a second time. The binding itself
+ * is the durable user-created permission boundary. Updates are serialized per
+ * target so fast note edits cannot arrive out of order. */
+export function publishCanvasContextUpdate(binding: ContextBinding, content: string): void {
+  const previous = contextUpdateQueues.get(binding.targetAgentNodeId) ?? Promise.resolve()
+  const next = previous
+    .catch(() => undefined)
+    .then(() => deliverCanvasContextUpdate(binding, content))
+  contextUpdateQueues.set(binding.targetAgentNodeId, next)
+  void next.finally(() => {
+    if (contextUpdateQueues.get(binding.targetAgentNodeId) === next) {
+      contextUpdateQueues.delete(binding.targetAgentNodeId)
+    }
+  })
+}
+
+/** Deliver provider-neutral delegation envelopes through the user-created
+ * agent binding. The binding is the approval boundary; the agent does not need
+ * to discover an API, inspect AppData, or ask the user to paste a second prompt. */
+export function dispatchCanvasDelegations(sourceAgentNodeId: string, response: string): void {
+  const state = useAppStore.getState()
+  for (const request of parseCanvasDelegationRequests(response)) {
+    const binding = state.canvasOrchestration.bindings.find((candidate): candidate is DelegationBinding =>
+      candidate.kind === 'delegation' &&
+      candidate.enabled &&
+      candidate.sourceAgentNodeId === sourceAgentNodeId &&
+      candidate.targetAgentNodeId === request.targetAgentNodeId
+    )
+    if (!binding) continue
+    const message = prepareDelegationDelivery(binding, request.content)
+    void deliverApprovedCanvasMessage(message.id)
+  }
+}
+
 /**
  * A context link is useful only when the target agent actually receives the
  * note. Creating a visual edge therefore queues and delivers the first
@@ -189,6 +278,7 @@ export async function deliverApprovedCanvasMessage(messageIdToDeliver: string): 
     const delivered = { ...transitionCanvasMessage(delivering, 'delivered', 'system'), providerReceipt: delivery.providerReceipt, deliveredAt: delivery.timestamp }
     persistWorkflowMessage(delivered)
     const response = await waitForAgentResponse({ target, baselineMessageIds: baseline })
+    dispatchCanvasDelegations(message.toAgentId, response.content)
     const handledByWorkflow = advanceSpecificationWorkflow(message, response)
     const output = useAppStore.getState().canvasOrchestration.bindings.find((binding): binding is OutputBinding =>
       binding.kind === 'output' && binding.sourceAgentNodeId === message.toAgentId && binding.enabled

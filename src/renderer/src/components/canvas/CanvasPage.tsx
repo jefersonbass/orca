@@ -16,7 +16,8 @@ import type { AddNodeType } from './CanvasToolbar'
 import { CANVAS_DRAW_TO_ADD_NODE, type CanvasTool } from './canvas-tool-types'
 import { exportCanvasPng, exportCanvasSvg } from './canvas-export'
 import { allowedBindingKinds, createOperationalBinding } from './canvas-operational-graph'
-import { autoDeliverContextBinding } from './canvas-orchestration-runtime'
+import { autoDeliverContextBinding, publishCanvasContextUpdate } from './canvas-orchestration-runtime'
+import { canvasNodeContextText } from './canvas-agent-context'
 
 const LEGACY_STORAGE_KEY = 'orca-canvas-document'
 
@@ -42,6 +43,7 @@ const CanvasPageInner: React.FC = () => {
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   const activeRepoId = useAppStore((s) => s.activeRepoId)
   const agentStatusByPaneKey = useAppStore((s) => s.agentStatusByPaneKey)
+  const canvasOrchestration = useAppStore((s) => s.canvasOrchestration)
   const addCanvasBinding = useAppStore((s) => s.addCanvasBinding)
   const removeCanvasBinding = useAppStore((s) => s.removeCanvasBinding)
   const reactFlowRef = useRef<any>(null)
@@ -53,6 +55,7 @@ const CanvasPageInner: React.FC = () => {
   const [linkStartNodeId, setLinkStartNodeId] = useState<string | null>(null)
   const [terminalDraft, setTerminalDraft] = useState<{ kind: 'terminal' | 'agent'; rect: { x: number; y: number; width: number; height: number } } | null>(null)
   const [resourceDraft, setResourceDraft] = useState<{ kind: 'file' | 'folder' | 'browser'; rect: { x: number; y: number; width: number; height: number } } | null>(null)
+  const contextSignaturesRef = useRef(new Map<string, string>())
   const canvasRuntimeWorktreeId = activeWorktreeId ?? FLOATING_TERMINAL_WORKTREE_ID
   const nodeCount = storeCanvasDocument?.nodes?.length ?? 0
 
@@ -86,9 +89,31 @@ const CanvasPageInner: React.FC = () => {
       if (alreadyBound) continue
       const binding = createOperationalBinding({ kind, sourceNodeId: source.id, targetNodeId: target.id })
       addCanvasBinding(binding)
-      if (binding.kind === 'context') autoDeliverContextBinding(binding)
     }
   }, [addCanvasBinding, storeCanvasDocument])
+
+  // The Canvas is a live context bus. A persisted binding is enough to grant
+  // delivery permission; every later source-node change is broadcast to the
+  // target agent automatically and in order.
+  useEffect(() => {
+    if (!storeCanvasDocument) return
+    const previous = contextSignaturesRef.current
+    const next = new Map<string, string>()
+    for (const binding of canvasOrchestration.bindings) {
+      if (binding.kind !== 'context' || !binding.enabled) continue
+      const source = storeCanvasDocument.nodes.find((node) => node.id === binding.sourceNodeId)
+      const content = source ? canvasNodeContextText(source) : 'missing canvas node'
+      const signature = `${binding.sourceNodeId}\0${content}`
+      const prior = previous.get(binding.id)
+      if (!prior) {
+        autoDeliverContextBinding(binding)
+      } else if (prior !== signature) {
+        publishCanvasContextUpdate(binding, content)
+      }
+      next.set(binding.id, signature)
+    }
+    contextSignaturesRef.current = next
+  }, [canvasOrchestration.bindings, storeCanvasDocument])
 
   const syncDoc = useCallback(
     (updater: (doc: NonNullable<typeof storeCanvasDocument>) => typeof storeCanvasDocument) => {
@@ -368,7 +393,6 @@ const CanvasPageInner: React.FC = () => {
       if (alreadyBound) return
       const binding = createOperationalBinding({ kind, sourceNodeId: source.id, targetNodeId: target.id })
       addCanvasBinding(binding)
-      if (binding.kind === 'context') autoDeliverContextBinding(binding)
     },
     [addCanvasBinding, setCanvasDocument, storeCanvasDocument]
   )

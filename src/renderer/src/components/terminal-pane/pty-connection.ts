@@ -3014,9 +3014,18 @@ export function connectPanePty(
     ORCA_WORKTREE_ID: deps.worktreeId,
     ...(launchToken ? { ORCA_AGENT_LAUNCH_TOKEN: launchToken } : {})
   }
+  const activeCanvasKey = state.activeCanvasWorkspaceKey ?? '__active_canvas__'
+  const canvasDocumentsByWorkspace = {
+    ...state.canvasDocumentsByWorkspaceKey,
+    ...(state.canvasDocument ? { [activeCanvasKey]: state.canvasDocument } : {})
+  }
+  const canvasOrchestrationsByWorkspace = {
+    ...state.canvasOrchestrationByWorkspaceKey,
+    [activeCanvasKey]: state.canvasOrchestration
+  }
   const canvasContextEnv = canvasAgentContextEnv(findCanvasAgentContextForTab(
-    state.canvasDocumentsByWorkspaceKey,
-    state.canvasOrchestrationByWorkspaceKey,
+    canvasDocumentsByWorkspace,
+    canvasOrchestrationsByWorkspace,
     deps.tabId
   ))
   const paneEnv = {
