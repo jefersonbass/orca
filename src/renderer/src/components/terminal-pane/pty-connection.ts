@@ -7,6 +7,7 @@ import { detectAgentStatusFromTitle, agentTypeToIconAgent, isClaudeAgent } from 
 import { resolvePaneTitleDecision } from './terminal-title-evidence'
 import { scheduleRuntimeGraphSync } from '@/runtime/sync-runtime-graph'
 import { useAppStore } from '@/store'
+import { canvasAgentContextEnv, findCanvasAgentContextForTab } from '@/components/canvas/canvas-agent-context'
 import { getWorktreeMapFromState } from '@/store/selectors'
 import { parseWorkspaceKey } from '../../../../shared/workspace-scope'
 import { TerminalKittyKeyboardModeTracker } from '../../../../shared/terminal-kitty-keyboard-mode-tracker'
@@ -3013,8 +3014,14 @@ export function connectPanePty(
     ORCA_WORKTREE_ID: deps.worktreeId,
     ...(launchToken ? { ORCA_AGENT_LAUNCH_TOKEN: launchToken } : {})
   }
+  const canvasContextEnv = canvasAgentContextEnv(findCanvasAgentContextForTab(
+    state.canvasDocumentsByWorkspaceKey,
+    state.canvasOrchestrationByWorkspaceKey,
+    deps.tabId
+  ))
   const paneEnv = {
     ...paneStartup?.env,
+    ...canvasContextEnv,
     ...paneIdentityEnv
   }
 

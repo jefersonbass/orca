@@ -9,6 +9,7 @@ import {
 import { scrapeNativeChatSession } from '@/components/native-chat/native-chat-scrape-fallback'
 import { useAppStore } from '@/store'
 import { sendRuntimePtyInputVerified } from '@/runtime/runtime-terminal-inspection'
+import { buildCanvasAgentContext } from './canvas-agent-context'
 
 export type DeliveryResult = {
   success: boolean
@@ -248,6 +249,9 @@ function formatAgentInstruction(message: AgentCanvasMessage): string {
       ).join('\n')}`
     : ''
   const state = useAppStore.getState()
+  const canvasContext = state.canvasDocument
+    ? buildCanvasAgentContext(state.canvasDocument, state.canvasOrchestration.bindings, message.toAgentId)
+    : null
   const routes = state.canvasOrchestration.bindings
     .filter((binding) => binding.enabled)
     .flatMap((binding) => {
@@ -282,6 +286,6 @@ function formatAgentInstruction(message: AgentCanvasMessage): string {
     ...incomingContext.map((entry) => `${entry.split(': ')[0]} -> ${message.toAgentId}`),
     ...linkedAgents.map((target) => `${message.toAgentId} -> ${target}`)
   ]
-  const canvasEnvelope = `\n\nOrca Canvas context (authoritative for this turn; do not infer it from the shell environment):\nORCA_NOTE=${JSON.stringify(incomingContext.join('\n'))}\nORCA_AGENTS=${JSON.stringify(linkedAgents.join(', '))}\nORCA_LINKS=${JSON.stringify(links.join('; '))}${incomingContext.length > 0 ? `\n\nLinked Canvas content:\n${incomingContext.join('\n')}` : ''}`
+  const canvasEnvelope = `\n\nOrca Canvas context (authoritative for this turn; do not infer it from the shell environment):\nORCA_NOTE=${JSON.stringify(incomingContext.join('\n'))}\nORCA_AGENTS=${JSON.stringify(linkedAgents.join(', '))}\nORCA_LINKS=${JSON.stringify(links.join('; '))}${canvasContext ? `\nORCA_CANVAS_NODE_ID=${canvasContext.nodeId}\nORCA_CANVAS_CONTEXT=${canvasContext.serialized}` : ''}${incomingContext.length > 0 ? `\n\nLinked Canvas content:\n${incomingContext.join('\n')}` : ''}`
   return `[${heading} from ${message.fromAgentId ?? 'user'}]\n\n${message.content}${context}${routeContext}${canvasEnvelope}`
 }
