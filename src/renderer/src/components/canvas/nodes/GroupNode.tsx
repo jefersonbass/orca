@@ -3,7 +3,7 @@ import type { NodeProps, Node } from '@xyflow/react'
 import { CanvasAnchors } from '../CanvasAnchors'
 
 type GroupNodeType = Node<
-  { label: string; color?: string },
+  { label: string; color?: string; childCount?: number },
   'group'
 >
 
@@ -30,8 +30,8 @@ export const GroupNode: React.FC<NodeProps<GroupNodeType>> = React.memo(
           {data.label || 'Group'}
         </div>
         <div className="flex size-full items-center justify-center" style={{ height: 'calc(100% - 28px)' }}>
-          <span className="text-[10px] text-worktree-sidebar-foreground/20 select-none">
-            Drag nodes into this frame to group them
+          <span className="text-center text-[10px] text-worktree-sidebar-foreground/30 select-none">
+            {data.childCount ? `${data.childCount} item${data.childCount === 1 ? '' : 's'} in frame` : 'Drag nodes into this frame to group them'}
           </span>
         </div>
         <CanvasAnchors active={selected} />

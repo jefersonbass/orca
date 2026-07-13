@@ -11,6 +11,9 @@ export type AddNodeType =
   | 'orchestrator'
   | 'live-terminal'
   | 'agent-terminal'
+  | 'browser-preview'
+  | 'file'
+  | 'folder'
   | 'drawing-freehand'
   | 'drawing-ellipse'
   | 'drawing-polygon'
@@ -47,6 +50,9 @@ const NODE_PALETTE: Array<{ type: CanvasTool; icon: string; label: string; descr
   { type: 'freehand', icon: '✏️', label: 'Freehand', description: 'Sketch a free path' },
   { type: 'ellipse', icon: '◯', label: 'Ellipse', description: 'Draw an oval shape' },
   { type: 'polygon', icon: '⬠', label: 'Polygon', description: 'Draw a decision shape' },
+  { type: 'file', icon: '📄', label: 'File', description: 'Attach a workspace file' },
+  { type: 'folder', icon: '📁', label: 'Folder', description: 'Attach a workspace folder' },
+  { type: 'browser', icon: '🌐', label: 'Browser', description: 'Embed a browser portal' },
 ]
 
 export const CanvasToolbar: React.FC<CanvasToolbarProps> = React.memo(

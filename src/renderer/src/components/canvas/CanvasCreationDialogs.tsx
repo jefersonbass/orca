@@ -70,3 +70,27 @@ export const NewTerminalDialog: React.FC<{
     </div>
   )
 }
+
+export const NewResourceDialog: React.FC<{
+  kind: 'file' | 'folder' | 'browser'
+  onCancel: () => void
+  onCreate: (draft: { label: string; value: string }) => void
+}> = ({ kind, onCancel, onCreate }) => {
+  const isBrowser = kind === 'browser'
+  const [label, setLabel] = useState(isBrowser ? 'Browser' : kind === 'file' ? 'File' : 'Folder')
+  const [value, setValue] = useState(isBrowser ? 'https://' : '')
+  const valueLabel = isBrowser ? 'Initial URL' : kind === 'file' ? 'Relative file path' : 'Relative folder path'
+
+  return (
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/45 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}>
+      <div className="w-[460px] max-w-full rounded-xl border border-worktree-sidebar-border bg-worktree-sidebar p-5 shadow-2xl" role="dialog" aria-modal="true" aria-label={`New ${kind}`}>
+        <div className="mb-4 flex items-center justify-between"><div><h2 className="text-[15px] font-semibold text-worktree-sidebar-foreground">New {kind[0].toUpperCase() + kind.slice(1)}</h2><p className="mt-0.5 text-[11px] text-worktree-sidebar-foreground/40">Place this resource in the rectangle you drew.</p></div><button type="button" onClick={onCancel} className="rounded px-2 py-1 text-lg text-worktree-sidebar-foreground/40 hover:bg-worktree-sidebar-foreground/10" aria-label={`Close new ${kind} dialog`}>×</button></div>
+        <div className="space-y-3">
+          <label className="block text-xs text-worktree-sidebar-foreground/60">Name<input value={label} onChange={(event) => setLabel(event.target.value)} className="mt-1 w-full rounded-md border border-worktree-sidebar-border bg-transparent px-2.5 py-2 text-sm text-worktree-sidebar-foreground outline-none focus:border-blue-400" /></label>
+          <label className="block text-xs text-worktree-sidebar-foreground/60">{valueLabel}<input value={value} onChange={(event) => setValue(event.target.value)} placeholder={isBrowser ? 'https://example.com' : 'src/renderer/src'} className="mt-1 w-full rounded-md border border-worktree-sidebar-border bg-transparent px-2.5 py-2 font-mono text-sm text-worktree-sidebar-foreground outline-none focus:border-blue-400" /></label>
+        </div>
+        <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={onCancel} className="rounded-md px-3 py-2 text-xs text-worktree-sidebar-foreground/55 hover:bg-worktree-sidebar-foreground/8">Cancel</button><button type="button" disabled={!label.trim() || !value.trim() || (isBrowser && value.trim() === 'https://')} onClick={() => onCreate({ label: label.trim(), value: value.trim() })} className="rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-40">Create {kind}</button></div>
+      </div>
+    </div>
+  )
+}

@@ -13,6 +13,9 @@ export type CanvasTool =
   | 'freehand'
   | 'ellipse'
   | 'polygon'
+  | 'file'
+  | 'folder'
+  | 'browser'
 
 export const CANVAS_DRAW_TO_ADD_NODE: Partial<Record<CanvasTool, string>> = {
   note: 'note',
@@ -27,4 +30,7 @@ export const CANVAS_DRAW_TO_ADD_NODE: Partial<Record<CanvasTool, string>> = {
   freehand: 'drawing-freehand',
   ellipse: 'drawing-ellipse',
   polygon: 'drawing-polygon',
+  file: 'file',
+  folder: 'folder',
+  browser: 'browser-preview',
 }

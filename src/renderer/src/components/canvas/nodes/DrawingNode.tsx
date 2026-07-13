@@ -1,6 +1,7 @@
-import React from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { CanvasAnchors } from '../CanvasAnchors'
+import { useAppStore } from '@/store'
 
 type DrawingNodeType = Node<
   {
@@ -18,7 +19,11 @@ type DrawingNodeType = Node<
 >
 
 export const DrawingNode: React.FC<NodeProps<DrawingNodeType>> = React.memo(
-  ({ data, selected }) => {
+  ({ id, data, selected }) => {
+    const [editing, setEditing] = useState(false)
+    const [label, setLabel] = useState(data.label ?? '')
+    const editorRef = useRef<HTMLTextAreaElement>(null)
+    const setCanvasDocument = useAppStore((state) => state.setCanvasDocument)
     const strokeColor = data.strokeColor ?? data.color ?? '#533483'
     const strokeWidth = data.strokeWidth ?? 2
     const fillColor = data.fillColor ?? 'transparent'
@@ -28,6 +33,17 @@ export const DrawingNode: React.FC<NodeProps<DrawingNodeType>> = React.memo(
 
     const strokeDasharray =
       lineStyle === 'dashed' ? '6 3' : lineStyle === 'dotted' ? '2 2' : undefined
+
+    useEffect(() => {
+      if (editing) editorRef.current?.focus()
+    }, [editing])
+
+    const persistLabel = useCallback(() => {
+      const document = useAppStore.getState().canvasDocument
+      if (!document) return
+      setCanvasDocument({ ...document, nodes: document.nodes.map((node) => node.id === id ? { ...node, label, metadata: { ...node.metadata, text: label } } : node) })
+      setEditing(false)
+    }, [id, label, setCanvasDocument])
 
     const renderShape = () => {
       switch (data.drawingType) {
@@ -78,7 +94,7 @@ export const DrawingNode: React.FC<NodeProps<DrawingNodeType>> = React.memo(
 
     return (
       <div
-        className={`size-full rounded-lg border-2 bg-worktree-sidebar/20 ${
+        className={`relative size-full rounded-lg border-2 bg-worktree-sidebar/20 ${
           selected ? 'border-blue-500' : hasColor ? 'border-dashed' : 'border-worktree-sidebar-border'
         }`}
         style={{
@@ -86,6 +102,7 @@ export const DrawingNode: React.FC<NodeProps<DrawingNodeType>> = React.memo(
         }}
         role="img"
         aria-label={`${data.drawingType ?? 'Drawing'} shape`}
+        onDoubleClick={() => setEditing(true)}
       >
         <svg
           className="size-full"
@@ -93,6 +110,24 @@ export const DrawingNode: React.FC<NodeProps<DrawingNodeType>> = React.memo(
         >
           {renderShape()}
         </svg>
+        {(editing || label) && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-3">
+            {editing ? (
+              <textarea
+                ref={editorRef}
+                value={label}
+                onChange={(event) => setLabel(event.target.value)}
+                onBlur={persistLabel}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') setEditing(false)
+                  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') persistLabel()
+                }}
+                className="pointer-events-auto nodrag nowheel min-h-[28px] w-full resize-none bg-transparent text-center text-[13px] text-worktree-sidebar-foreground outline-none"
+                aria-label="Edit drawing label"
+              />
+            ) : <span className="text-center text-[13px] text-worktree-sidebar-foreground">{label}</span>}
+          </div>
+        )}
         <CanvasAnchors active={selected} />
       </div>
     )

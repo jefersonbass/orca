@@ -5,11 +5,11 @@ import { KnowledgeArtifactDialog } from './KnowledgeArtifactDialog'
 import { OperationalBindingDialog } from './OperationalBindingDialog'
 import { BindingInspector } from './BindingInspector'
 import { CanvasOrchestrationPanel } from './CanvasOrchestrationPanel'
-import { NewTerminalDialog, type TerminalCreationDraft } from './CanvasCreationDialogs'
+import { NewResourceDialog, NewTerminalDialog, type TerminalCreationDraft } from './CanvasCreationDialogs'
 import { useAppStore } from '@/store'
 import { createNewTerminalTab } from '@/components/terminal/terminal-tab-actions'
 import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
-import type { CanvasEdgeDocument, CanvasUndoAction } from '../../../../shared/canvas-types'
+import type { CanvasEdgeDocument, CanvasResourceReference, CanvasUndoAction } from '../../../../shared/canvas-types'
 import type { AddNodeType } from './CanvasToolbar'
 import { CANVAS_DRAW_TO_ADD_NODE, type CanvasTool } from './canvas-tool-types'
 import { exportCanvasPng, exportCanvasSvg } from './canvas-export'
@@ -41,7 +41,10 @@ const CanvasPageInner: React.FC = () => {
   const reactFlowRef = useRef<any>(null)
   const [rfReady, setRfReady] = useState(false)
   const [activeTool, setActiveTool] = useState<CanvasTool>('select')
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
+  const [linkStartNodeId, setLinkStartNodeId] = useState<string | null>(null)
   const [terminalDraft, setTerminalDraft] = useState<{ kind: 'terminal' | 'agent'; rect: { x: number; y: number; width: number; height: number } } | null>(null)
+  const [resourceDraft, setResourceDraft] = useState<{ kind: 'file' | 'folder' | 'browser'; rect: { x: number; y: number; width: number; height: number } } | null>(null)
   const nodeCount = storeCanvasDocument?.nodes?.length ?? 0
 
   // ── Persistence ──
@@ -92,7 +95,7 @@ const CanvasPageInner: React.FC = () => {
 
   // ── Add node ──
   const handleAddNode = useCallback(
-    (type: AddNodeType, position?: { x: number; y: number }, size?: { width: number; height: number }, extraMetadata?: Record<string, unknown>, labelOverride?: string) => {
+    (type: AddNodeType, position?: { x: number; y: number }, size?: { width: number; height: number }, extraMetadata?: Record<string, unknown>, labelOverride?: string, resourceRefOverride?: CanvasResourceReference) => {
       const id = `node_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
       const base = (doc: NonNullable<typeof storeCanvasDocument>) => {
         const pos = position ?? {
@@ -105,7 +108,7 @@ const CanvasPageInner: React.FC = () => {
         const latestTab = tabs[tabs.length - 1]
 
         // Resolve terminal tab reference
-        let resourceRef: import('../../../../shared/canvas-types').CanvasResourceReference | undefined = undefined
+        let resourceRef: CanvasResourceReference | undefined = resourceRefOverride
         if (type === 'live-terminal') {
           if (latestTab) {
             resourceRef = { kind: 'terminal-tab' as const, tabId: latestTab.id, worktreeId: activeWorktreeId ?? '' }
@@ -181,11 +184,30 @@ const CanvasPageInner: React.FC = () => {
       setActiveTool('select')
       return
     }
+    if (tool === 'file' || tool === 'folder' || tool === 'browser') {
+      setResourceDraft({ kind: tool, rect })
+      setActiveTool('select')
+      return
+    }
     const nodeType = CANVAS_DRAW_TO_ADD_NODE[tool] as AddNodeType | undefined
     if (!nodeType) return
     handleAddNode(nodeType, { x: rect.x, y: rect.y }, { width: rect.width, height: rect.height })
     setActiveTool('select')
   }, [handleAddNode])
+
+  const handleCreateResource = useCallback((draft: { label: string; value: string }) => {
+    if (!resourceDraft) return
+    const { kind, rect } = resourceDraft
+    const type: AddNodeType = kind === 'file' ? 'file' : kind === 'folder' ? 'folder' : 'browser-preview'
+    const metadata = kind === 'browser' ? { url: draft.value } : { relativePath: draft.value }
+    const resourceRef: CanvasResourceReference = kind === 'file'
+      ? { kind: 'file', worktreeId: activeWorktreeId ?? '', relativePath: draft.value }
+      : kind === 'folder'
+        ? { kind: 'folder', worktreeId: activeWorktreeId ?? '', relativePath: draft.value }
+        : { kind: 'browser-preview', url: draft.value, title: draft.label }
+    handleAddNode(type, { x: rect.x, y: rect.y }, { width: rect.width, height: rect.height }, metadata, draft.label, resourceRef)
+    setResourceDraft(null)
+  }, [activeWorktreeId, handleAddNode, resourceDraft])
 
   const handleCreateTerminal = useCallback((draft: TerminalCreationDraft) => {
     if (!terminalDraft) return
@@ -199,13 +221,24 @@ const CanvasPageInner: React.FC = () => {
     setTerminalDraft(null)
   }, [handleAddNode, terminalDraft])
 
-  const handleNodeDroppedOnFrame = useCallback((nodeId: string, frameId: string) => {
+  const handleNodeDroppedOnFrame = useCallback((nodeId: string, frameId: string | null) => {
     if (!storeCanvasDocument || nodeId === frameId) return
     setCanvasDocument({
       ...storeCanvasDocument,
-      nodes: storeCanvasDocument.nodes.map((node) => node.id === nodeId ? { ...node, groupId: frameId } : node),
+      nodes: storeCanvasDocument.nodes.map((node) => {
+        if (node.id !== nodeId) return node
+        if (frameId) return { ...node, groupId: frameId }
+        const nextNode = { ...node }
+        delete nextNode.groupId
+        return nextNode
+      }),
     })
   }, [setCanvasDocument, storeCanvasDocument])
+
+  const handleToolChange = useCallback((tool: CanvasTool) => {
+    setActiveTool(tool)
+    if (tool !== 'link') setLinkStartNodeId(null)
+  }, [])
 
   // ── Context menu state ──
   const [nodeCtx, setNodeCtx] = useState<{ nodeId: string; x: number; y: number } | null>(null)
@@ -315,21 +348,45 @@ const CanvasPageInner: React.FC = () => {
     []
   )
 
-  const handleDeleteNode = useCallback(() => {
-    if (!nodeCtx || !storeCanvasDocument) return
-    const node = storeCanvasDocument.nodes.find((n) => n.id === nodeCtx.nodeId)
+  const handleDeleteNodeById = useCallback((nodeId: string) => {
+    if (!storeCanvasDocument) return
+    const node = storeCanvasDocument.nodes.find((n) => n.id === nodeId)
     const edges = storeCanvasDocument.edges ?? []
-    const connectedEdges = edges.filter((e) => e.sourceNodeId === nodeCtx.nodeId || e.targetNodeId === nodeCtx.nodeId)
+    const connectedEdges = edges.filter((e) => e.sourceNodeId === nodeId || e.targetNodeId === nodeId)
     const store = useAppStore.getState()
     if (node) store.pushUndo({ type: 'remove-node', node })
     connectedEdges.forEach((e) => store.pushUndo({ type: 'remove-edge', edge: e }))
     setCanvasDocument({
       ...storeCanvasDocument,
-      nodes: storeCanvasDocument.nodes.filter((n) => n.id !== nodeCtx.nodeId),
-      edges: edges.filter((e) => e.sourceNodeId !== nodeCtx.nodeId && e.targetNodeId !== nodeCtx.nodeId),
+      nodes: storeCanvasDocument.nodes.filter((n) => n.id !== nodeId),
+      edges: edges.filter((e) => e.sourceNodeId !== nodeId && e.targetNodeId !== nodeId),
     })
+    setSelectedNodeIds((ids) => ids.filter((id) => id !== nodeId))
+  }, [setCanvasDocument, storeCanvasDocument])
+
+  const handleDeleteNode = useCallback(() => {
+    if (!nodeCtx) return
+    handleDeleteNodeById(nodeCtx.nodeId)
     setNodeCtx(null)
-  }, [nodeCtx, storeCanvasDocument, setCanvasDocument])
+  }, [handleDeleteNodeById, nodeCtx])
+
+  const handleEditSelectedNode = useCallback(() => {
+    const selectedId = selectedNodeIds[0]
+    if (!selectedId) return
+    const element = Array.from(document.querySelectorAll<HTMLElement>('.react-flow__node')).find((candidate) => candidate.dataset.id === selectedId)
+    element?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+  }, [selectedNodeIds])
+
+  const handleRefreshSelectedNode = useCallback(() => {
+    const selectedId = selectedNodeIds[0]
+    if (!selectedId || !storeCanvasDocument) return
+    setCanvasDocument({
+      ...storeCanvasDocument,
+      nodes: storeCanvasDocument.nodes.map((node) => node.id === selectedId
+        ? { ...node, metadata: { ...node.metadata, refreshRequestedAt: new Date().toISOString() } }
+        : node),
+    })
+  }, [selectedNodeIds, setCanvasDocument, storeCanvasDocument])
 
   const handleNodeColor = useCallback(
     (color: string) => {
@@ -400,8 +457,16 @@ const CanvasPageInner: React.FC = () => {
         onToggleBindings={() => setShowBindingInspector((v) => !v)}
         onToggleOrchestration={() => setShowOrchestration((v) => !v)}
         activeTool={activeTool}
-        onToolChange={setActiveTool}
+        onToolChange={handleToolChange}
       />
+      {selectedNodeIds.length > 0 && (
+        <div className="absolute left-1/2 top-10 z-30 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-blue-400/30 bg-worktree-sidebar/95 px-1.5 py-1 shadow-xl backdrop-blur" role="toolbar" aria-label="Selected node actions">
+          <button type="button" onClick={handleEditSelectedNode} className="rounded px-2 py-1 text-[11px] text-worktree-sidebar-foreground/70 hover:bg-worktree-sidebar-foreground/10" aria-label="Edit selected node">✎ Edit</button>
+          <button type="button" onClick={() => { setLinkStartNodeId(selectedNodeIds[0]); handleToolChange('link') }} className="rounded px-2 py-1 text-[11px] text-blue-300 hover:bg-blue-500/15" aria-label="Link selected node">🔗 Link</button>
+          <button type="button" onClick={handleRefreshSelectedNode} className="rounded px-2 py-1 text-[11px] text-worktree-sidebar-foreground/70 hover:bg-worktree-sidebar-foreground/10" aria-label="Refresh selected node">↻ Refresh</button>
+          <button type="button" onClick={() => handleDeleteNodeById(selectedNodeIds[0])} className="rounded px-2 py-1 text-[11px] text-red-300 hover:bg-red-500/15" aria-label="Delete selected node">⌫ Delete</button>
+        </div>
+      )}
 
       {/* Node context menu */}
       {nodeCtx && (
@@ -529,6 +594,8 @@ const CanvasPageInner: React.FC = () => {
             activeTool={activeTool}
             onCreateRect={handleCreateRect}
             onNodeDroppedOnFrame={handleNodeDroppedOnFrame}
+            onSelectionChange={setSelectedNodeIds}
+            linkStartNodeId={linkStartNodeId}
             onViewportChange={handleViewportChange}
             onInit={handleInit}
             onReactFlowReady={handleReactFlowReady}
@@ -584,6 +651,13 @@ const CanvasPageInner: React.FC = () => {
           kind={terminalDraft.kind}
           onCancel={() => setTerminalDraft(null)}
           onCreate={handleCreateTerminal}
+        />
+      )}
+      {resourceDraft && (
+        <NewResourceDialog
+          kind={resourceDraft.kind}
+          onCancel={() => setResourceDraft(null)}
+          onCreate={handleCreateResource}
         />
       )}
     </div>
