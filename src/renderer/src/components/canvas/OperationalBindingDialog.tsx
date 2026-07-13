@@ -28,7 +28,7 @@ export const OperationalBindingDialog: React.FC<OperatonalBindingDialogProps> = 
   const addCanvasBinding = useAppStore((state) => state.addCanvasBinding)
 
   const validCombinations: Array<{ kind: BindingKind; label: string; from: string; to: string }> = [
-    { kind: 'context', label: 'Context', from: 'note,file,task,diff', to: 'agent' },
+    { kind: 'context', label: 'Context', from: 'note,file,folder,browser,diff,PR,task,shape', to: 'terminal/agent' },
     { kind: 'delegation', label: 'Delegation', from: 'agent', to: 'agent' },
     { kind: 'output', label: 'Output', from: 'agent', to: 'note,sticky-note' },
     { kind: 'reporting', label: 'Reporting', from: 'agent', to: 'agent' },

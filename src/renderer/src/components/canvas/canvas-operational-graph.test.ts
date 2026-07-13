@@ -6,6 +6,9 @@ describe('canvas operational graph', () => {
     expect(allowedBindingKinds('note', 'agent-terminal')).toEqual(['context'])
     expect(allowedBindingKinds('agent-terminal', 'agent-terminal')).toEqual(['delegation', 'reporting'])
     expect(allowedBindingKinds('agent-terminal', 'note')).toEqual(['output'])
+    expect(allowedBindingKinds('browser-preview', 'agent-terminal')).toEqual(['context'])
+    expect(allowedBindingKinds('pull-request', 'live-terminal')).toEqual(['context'])
+    expect(allowedBindingKinds('highlight', 'agent-terminal')).toEqual(['context'])
     expect(allowedBindingKinds('note', 'note')).toEqual([])
   })
 

@@ -44,7 +44,7 @@ export const CanvasOrchestrationPanel: React.FC<{ onClose?: () => void }> = ({ o
           )}
         </div>
         {contextBindings.length === 0 ? (
-          <p className="text-xs text-worktree-sidebar-foreground/40">Create a Note → Agent operational binding.</p>
+          <p className="text-xs text-worktree-sidebar-foreground/40">Link any context element to a terminal or agent to make it executable.</p>
         ) : contextBindings.map((binding) => (
           <button key={binding.id} type="button" onClick={() => prepareContextDelivery(binding)}
             className="mb-1 w-full rounded-md border border-worktree-sidebar-border px-2 py-1.5 text-left text-xs text-worktree-sidebar-foreground hover:bg-worktree-sidebar-foreground/5">

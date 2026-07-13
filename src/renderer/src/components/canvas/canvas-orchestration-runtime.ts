@@ -1,6 +1,7 @@
 import { useAppStore } from '@/store'
 import type { AgentCanvasMessage, CanvasOperationalBinding, ContextBinding } from '../../../../shared/canvas-agent-types'
 import type { CanvasAgentReference, DelegationBinding, OutputBinding, ReportingBinding } from '../../../../shared/canvas-agent-types'
+import type { CanvasNodeDocument } from '../../../../shared/canvas-types'
 import { readAgentMessageIds, resolveCanvasAgent, sendInstruction, waitForAgentResponse } from './canvas-provider-adapter'
 import { transitionCanvasMessage } from '../../../../shared/canvas-state-machines'
 import {
@@ -15,10 +16,35 @@ function messageId(): string {
   return `msg_${crypto.randomUUID()}`
 }
 
-function nodeContent(nodeId: string): string {
+function metadataText(node: CanvasNodeDocument, key: string): string {
+  const value = node.metadata?.[key]
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function nodeContent(nodeId: string): { content: string; resourceType: string } {
   const node = useAppStore.getState().canvasDocument?.nodes.find((item) => item.id === nodeId)
-  const content = node?.metadata?.content
-  return typeof content === 'string' ? content : ''
+  if (!node) return { content: '', resourceType: 'unknown' }
+  const ref = node.resourceRef
+  const content = metadataText(node, 'content') || metadataText(node, 'text')
+  if (content) return { content, resourceType: node.type }
+
+  switch (node.type) {
+    case 'file':
+    case 'folder':
+      return { content: `Workspace ${node.type}: ${metadataText(node, 'relativePath') || node.label}`, resourceType: node.type }
+    case 'diff':
+      return { content: `Diff: ${node.label}${metadataText(node, 'diffId') ? `\nID: ${metadataText(node, 'diffId')}` : ''}`, resourceType: node.type }
+    case 'pull-request':
+      return { content: `Pull request: ${node.label}${metadataText(node, 'id') ? `\nID: ${metadataText(node, 'id')}` : ''}`, resourceType: node.type }
+    case 'task':
+      return { content: `Task: ${node.label}${metadataText(node, 'taskId') ? `\nID: ${metadataText(node, 'taskId')}` : ''}`, resourceType: node.type }
+    case 'browser-preview':
+      return { content: `Browser page: ${metadataText(node, 'url') || (ref?.kind === 'browser-preview' ? ref.url : node.label)}`, resourceType: node.type }
+    case 'browser-session':
+      return { content: `Browser session: ${node.label}${ref?.kind === 'browser-session' ? `\nSession: ${ref.sessionId}` : ''}`, resourceType: node.type }
+    default:
+      return { content: node.label, resourceType: node.type }
+  }
 }
 
 function referenceForAgentNode(nodeId: string): CanvasAgentReference | null {
@@ -45,7 +71,11 @@ function referenceForAgentNode(nodeId: string): CanvasAgentReference | null {
   // tab. The live agent-status index is the authoritative source for the
   // pane/session/provider that appears after the CLI starts, so preserve the
   // tab identity here instead of treating the node as an unbound terminal.
-  if (ref?.kind === 'terminal-tab' && node?.type === 'agent-terminal') {
+  if (
+    ref?.kind === 'terminal-tab' &&
+    (node?.type === 'agent-terminal' ||
+      (node?.type === 'live-terminal' && typeof node.metadata?.agent === 'string'))
+  ) {
     const provider = typeof node.metadata?.agent === 'string' ? node.metadata.agent : 'unknown'
     return {
       agentSessionId: '',
@@ -59,10 +89,11 @@ function referenceForAgentNode(nodeId: string): CanvasAgentReference | null {
 }
 
 export function prepareContextDelivery(binding: ContextBinding, taskId?: string, contentOverride?: string): AgentCanvasMessage {
+  const source = nodeContent(binding.sourceNodeId)
   const draft: AgentCanvasMessage = {
     id: messageId(), toAgentId: binding.targetAgentNodeId, taskId, type: 'instruction',
-    content: contentOverride ?? nodeContent(binding.sourceNodeId),
-    contextRefs: [{ nodeId: binding.sourceNodeId, resourceType: 'note' }],
+    content: contentOverride ?? source.content,
+    contextRefs: [{ nodeId: binding.sourceNodeId, resourceType: source.resourceType }],
     createdAt: new Date().toISOString(), deliveryState: 'draft'
   }
   const message = transitionCanvasMessage(draft, 'awaiting-approval', 'user')

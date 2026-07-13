@@ -6,8 +6,15 @@ type OperationalCategory = 'note' | 'agent' | 'context-resource' | 'unsupported'
 
 function category(type: CanvasNodeType): OperationalCategory {
   if (type === 'note' || type === 'sticky-note') return 'note'
-  if (type === 'agent-terminal' || type === 'agent-summary' || type === 'orchestrator') return 'agent'
-  if (type === 'file' || type === 'folder' || type === 'task' || type === 'diff') return 'context-resource'
+  // A terminal created with an agent preset (OpenCode, Codex, Claude, etc.)
+  // is persisted as `live-terminal`; it still participates in the agent graph.
+  if (type === 'live-terminal' || type === 'agent-terminal' || type === 'agent-summary' || type === 'orchestrator') return 'agent'
+  if (
+    type === 'file' || type === 'folder' || type === 'task' || type === 'diff' ||
+    type === 'pull-request' || type === 'browser-preview' || type === 'browser-session' ||
+    type === 'label' || type === 'rectangle' || type === 'highlight' || type === 'drawing' ||
+    type === 'terminal-summary' || type === 'missing-resource'
+  ) return 'context-resource'
   return 'unsupported'
 }
 
