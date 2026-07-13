@@ -165,6 +165,9 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   const [linkPointer, setLinkPointer] = useState<{ x: number; y: number } | null>(null)
   const reactFlowInstanceRef = useRef<any>(null)
   const pendingClickSourceRef = useRef<string | null>(null)
+  const selectedNodeIdsRef = useRef<Set<string>>(new Set())
+  const drawingRef = useRef<{ x: number; y: number } | null>(null)
+  const draftRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
   const [isDark, setIsDark] = useState(true)
   const onEdgeCreatedRef = useRef(onEdgeCreated)
 
@@ -192,7 +195,7 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     height: docNode.size.height,
     zIndex: docNode.type === 'group' ? docNode.zIndex - 1000 : docNode.zIndex,
     data: { ...docNode, ...docNode.metadata, childCount: canvasDocumentNodes.filter((node) => node.groupId === docNode.id).length } as any,
-    selected: false,
+    selected: selectedNodeIdsRef.current.has(docNode.id),
   }))
 
   // Create React Flow edges from CanvasEdgeDocument data
@@ -213,7 +216,8 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
       id: docNode.id, type: docNode.type, position: docNode.position,
       width: docNode.size.width, height: docNode.size.height,
       zIndex: docNode.type === 'group' ? docNode.zIndex - 1000 : docNode.zIndex,
-      data: { ...docNode, ...docNode.metadata, childCount: canvasDocumentNodes.filter((node) => node.groupId === docNode.id).length } as any, selected: false
+      data: { ...docNode, ...docNode.metadata, childCount: canvasDocumentNodes.filter((node) => node.groupId === docNode.id).length } as any,
+      selected: selectedNodeIdsRef.current.has(docNode.id)
     }))
     flowNodesRef.current = nextNodes
     setFlowNodes(nextNodes)
@@ -313,37 +317,63 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   }, [snap])
 
   const updateDraftRect = useCallback((start: { x: number; y: number }, current: { x: number; y: number }) => {
-    setDraftRect({
+    const nextRect = {
       x: Math.min(start.x, current.x),
       y: Math.min(start.y, current.y),
       width: Math.abs(current.x - start.x),
       height: Math.abs(current.y - start.y),
-    })
+    }
+    draftRectRef.current = nextRect
+    setDraftRect(nextRect)
   }, [])
-
-  const onPaneMouseDown = useCallback((event: any) => {
-    if (activeTool === 'select' || activeTool === 'link' || event.button !== 0) return
-    const start = toCanvasPoint(event)
-    setDrawing(start)
-    setDraftRect({ x: start.x, y: start.y, width: 0, height: 0 })
-  }, [activeTool, toCanvasPoint])
 
   const onPaneMouseMove = useCallback((event: any) => {
     const point = toCanvasPoint(event)
     if (activeTool === 'link') setLinkPointer(point)
-    if (drawing) updateDraftRect(drawing, point)
-  }, [activeTool, drawing, toCanvasPoint, updateDraftRect])
+  }, [activeTool, toCanvasPoint])
 
   const finishDrawing = useCallback(() => {
-    if (!drawing || !draftRect) return
-    const completedRect = draftRect
+    const completedRect = draftRectRef.current
+    if (!drawingRef.current || !completedRect) return
+    drawingRef.current = null
+    draftRectRef.current = null
     setDrawing(null)
     setDraftRect(null)
     if (completedRect.width < 40 || completedRect.height < 40) return
     onCreateRect?.(activeTool, completedRect)
-  }, [activeTool, draftRect, drawing, onCreateRect])
+  }, [activeTool, onCreateRect])
 
-  const onPaneMouseUp = useCallback(() => finishDrawing(), [finishDrawing])
+  const onCanvasPointerDownCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (activeTool === 'select' || activeTool === 'link' || event.button !== 0) return
+    const target = event.target as Element | null
+    if (!target?.closest('.react-flow__pane') || target.closest('.react-flow__node') || target.closest('.react-flow__minimap')) return
+    const start = toCanvasPoint(event)
+    drawingRef.current = start
+    draftRectRef.current = { x: start.x, y: start.y, width: 0, height: 0 }
+    setDrawing(start)
+    setDraftRect(draftRectRef.current)
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    event.preventDefault()
+    event.stopPropagation()
+  }, [activeTool, toCanvasPoint])
+
+  const onCanvasPointerMoveCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const start = drawingRef.current
+    if (!start) return
+    updateDraftRect(start, toCanvasPoint(event))
+    event.preventDefault()
+    event.stopPropagation()
+  }, [toCanvasPoint, updateDraftRect])
+
+  const onCanvasPointerUpCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!drawingRef.current) return
+    finishDrawing()
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    event.preventDefault()
+    event.stopPropagation()
+  }, [finishDrawing])
 
   const onNodeDragStop = useCallback((_event: any, node: any) => {
     if (node.type === 'group') return
@@ -363,6 +393,8 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     if (!drawing) return
     const cancelDrawing = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
+      drawingRef.current = null
+      draftRectRef.current = null
       setDrawing(null)
       setDraftRect(null)
     }
@@ -447,6 +479,30 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   // Grid color based on theme
   const gridColor = isDark ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.06)'
 
+  const handleSelectionChange = useCallback((selection: { nodes?: Array<{ id: string }> }) => {
+    const ids = (selection.nodes ?? []).map((node) => node.id)
+    selectedNodeIdsRef.current = new Set(ids)
+    onSelectionChange?.(ids)
+  }, [onSelectionChange])
+
+  const handleNodeClick = useCallback((_event: any, node: any) => {
+    if (activeTool !== 'link') {
+      selectedNodeIdsRef.current = new Set([node.id])
+      onSelectionChange?.([node.id])
+      return
+    }
+    const source = pendingClickSourceRef.current
+    if (!source) {
+      pendingClickSourceRef.current = node.id
+      setConnecting(true)
+      return
+    }
+    createEdge(source, node.id)
+    pendingClickSourceRef.current = null
+    setConnecting(false)
+    setLinkPointer(null)
+  }, [activeTool, createEdge, onSelectionChange])
+
   const flowProps: Record<string, unknown> = {
     nodes: flowNodes,
     edges: flowEdges,
@@ -473,22 +529,8 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
       event.preventDefault()
       onNodeContextMenu?.({ nodeId: node.id, x: event.clientX, y: event.clientY })
     },
-    onSelectionChange: (selection: { nodes?: Array<{ id: string }> }) => {
-      onSelectionChange?.((selection.nodes ?? []).map((node) => node.id))
-    },
-    onNodeClick: (_event: any, node: any) => {
-      if (activeTool !== 'link') return
-      const source = pendingClickSourceRef.current
-      if (!source) {
-        pendingClickSourceRef.current = node.id
-        setConnecting(true)
-        return
-      }
-      createEdge(source, node.id)
-      pendingClickSourceRef.current = null
-      setConnecting(false)
-      setLinkPointer(null)
-    },
+    onSelectionChange: handleSelectionChange,
+    onNodeClick: handleNodeClick,
     onEdgeContextMenu: (event: any, edge: any) => {
       event.preventDefault()
       onEdgeContextMenu?.({ edgeId: edge.id, x: event.clientX, y: event.clientY })
@@ -502,13 +544,18 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     colorMode: isDark ? 'dark' : 'light',
     className: 'canvas-flow',
     panOnDrag: activeTool === 'select',
-    onPaneMouseDown,
     onPaneMouseMove,
-    onPaneMouseUp,
     onNodeDragStop,
   }
   return (
-    <div className="relative size-full overflow-hidden" style={{ background: isDark ? '#1a1a2e' : '#f5f5f5' }}>
+    <div
+      className="relative size-full overflow-hidden"
+      style={{ background: isDark ? '#1a1a2e' : '#f5f5f5' }}
+      onPointerDownCapture={onCanvasPointerDownCapture}
+      onPointerMoveCapture={onCanvasPointerMoveCapture}
+      onPointerUpCapture={onCanvasPointerUpCapture}
+      onPointerCancel={onCanvasPointerUpCapture}
+    >
       {connecting && (
         <div className="pointer-events-none absolute left-1/2 top-3 z-50 -translate-x-1/2 rounded-full border border-blue-400/40 bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-300 shadow-lg backdrop-blur">
           Connecting… drag or click a target handle

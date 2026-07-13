@@ -30,6 +30,10 @@ export const DrawingNode: React.FC<NodeProps<DrawingNodeType>> = React.memo(
     const opacity = data.opacity ?? 1
     const lineStyle = data.lineStyle ?? 'solid'
     const hasColor = !!data.color
+    const defaultPoints = data.drawingType === 'polygon'
+      ? [{ x: 50, y: 12 }, { x: 88, y: 82 }, { x: 12, y: 82 }]
+      : [{ x: 8, y: 64 }, { x: 24, y: 38 }, { x: 40, y: 58 }, { x: 58, y: 24 }, { x: 76, y: 48 }, { x: 92, y: 20 }]
+    const points = data.points ?? defaultPoints
 
     const strokeDasharray =
       lineStyle === 'dashed' ? '6 3' : lineStyle === 'dotted' ? '2 2' : undefined
@@ -48,9 +52,9 @@ export const DrawingNode: React.FC<NodeProps<DrawingNodeType>> = React.memo(
     const renderShape = () => {
       switch (data.drawingType) {
         case 'freehand':
-          return data.points ? (
+          return (
             <polyline
-              points={data.points.map((p) => `${p.x},${p.y}`).join(' ')}
+              points={points.map((p) => `${p.x},${p.y}`).join(' ')}
               fill="none"
               stroke={strokeColor}
               strokeWidth={strokeWidth}
@@ -58,7 +62,7 @@ export const DrawingNode: React.FC<NodeProps<DrawingNodeType>> = React.memo(
               opacity={opacity}
               style={{ pointerEvents: 'none' }}
             />
-          ) : null
+          )
 
         case 'ellipse':
           return (
@@ -76,16 +80,16 @@ export const DrawingNode: React.FC<NodeProps<DrawingNodeType>> = React.memo(
           )
 
         case 'polygon':
-          return data.points ? (
+          return (
             <polygon
-              points={data.points.map((p) => `${p.x},${p.y}`).join(' ')}
+              points={points.map((p) => `${p.x},${p.y}`).join(' ')}
               fill={fillColor}
               stroke={strokeColor}
               strokeWidth={strokeWidth}
               strokeDasharray={strokeDasharray}
               opacity={opacity}
             />
-          ) : null
+          )
 
         default:
           return null
@@ -106,6 +110,8 @@ export const DrawingNode: React.FC<NodeProps<DrawingNodeType>> = React.memo(
       >
         <svg
           className="size-full"
+          viewBox={!data.points ? '0 0 100 100' : undefined}
+          preserveAspectRatio="none"
           style={{ minWidth: 40, minHeight: 40, overflow: 'visible' }}
         >
           {renderShape()}

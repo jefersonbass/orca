@@ -46,28 +46,35 @@ export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
         : resourceRef?.kind === 'agent-terminal'
           ? resourceRef.paneKey
           : undefined)
-    const tabId = resourceRef?.kind === 'agent-pane' ? resourceRef.tabId : paneKey?.split(':')[0]
-    const worktreeId = resourceRef?.kind === 'agent-pane' ? resourceRef.worktreeId : ''
+    const tabId = resourceRef?.kind === 'agent-pane'
+      ? resourceRef.tabId
+      : resourceRef?.kind === 'terminal-tab'
+        ? resourceRef.tabId
+        : paneKey?.split(':')[0]
+    const worktreeId = resourceRef?.kind === 'agent-pane'
+      ? resourceRef.worktreeId
+      : resourceRef?.kind === 'terminal-tab'
+        ? resourceRef.worktreeId
+        : ''
+    const portalKey = paneKey ?? (tabId ? `canvas-tab:${tabId}` : undefined)
     const statusColor = statusColors[data.agentStatus ?? 'idle'] ?? statusColors.idle
     const statusLabel = statusLabels[data.agentStatus ?? 'idle'] ?? 'Unknown'
 
     const borderColor = data.color ?? (selected ? '#3b82f6' : '#533483')
     const hasColor = !!data.color
-    const hasAgent = !!paneKey
+    const hasAgent = !!(paneKey || tabId)
 
     // Register portal target on mount
     useEffect(() => {
-      if (!paneKey || !tabId || !portalRef.current) return
+      if (!portalKey || !tabId || !portalRef.current) return
       const target = portalRef.current
       const existing = getCanvasPortalTargets()
       setCanvasPortalTargets([
-        ...existing.filter((entry) => entry.paneKey !== paneKey),
+        ...existing.filter((entry) => entry.target !== target && entry.paneKey !== portalKey),
         { paneKey, tabId, worktreeId, target, active: true }
       ])
-      return () => {
-        setCanvasPortalTargets(getCanvasPortalTargets().filter((entry) => entry.paneKey !== paneKey))
-      }
-    }, [paneKey, tabId, worktreeId])
+      return () => setCanvasPortalTargets(getCanvasPortalTargets().filter((entry) => entry.target !== target))
+    }, [paneKey, portalKey, tabId, worktreeId])
 
     const handleFocus = useCallback(() => {
       portalRef.current?.querySelector<HTMLElement>('.xterm-helper-textarea')?.focus()
@@ -75,7 +82,7 @@ export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
 
     return (
       <div
-        className={`min-w-[240px] min-h-[160px] rounded-lg border-2 bg-worktree-sidebar shadow-sm ${
+        className={`size-full min-w-0 min-h-0 overflow-hidden rounded-lg border-2 bg-worktree-sidebar shadow-sm ${
           selected ? 'border-blue-500' : hasColor ? 'border-dashed' : 'border-worktree-sidebar-border'
         }`}
         style={{
@@ -118,7 +125,7 @@ export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
           onClick={handleFocus}
           data-pane-key={paneKey}
         >
-          {!paneKey && (
+          {!hasAgent && (
             <div className="flex flex-col items-center gap-2 px-4 text-center">
               <div className="text-xs text-worktree-sidebar-foreground/45">No live agent attached</div>
               <div className="text-[10px] text-worktree-sidebar-foreground/30">Add an agent from the + menu to start working</div>

@@ -34,7 +34,7 @@ export const OrchestratorNode: React.FC<NodeProps<OrchestratorNodeType>> = React
 
     return (
       <div
-        className={`min-w-[220px] rounded-lg border-2 bg-worktree-sidebar shadow-sm ${
+        className={`size-full min-w-0 min-h-0 overflow-hidden rounded-lg border-2 bg-worktree-sidebar shadow-sm ${
           selected && !hasColor ? 'border-blue-500' : hasColor ? 'border-dashed' : 'border-worktree-sidebar-border'
         }`}
         style={{

@@ -11,7 +11,7 @@ export const FolderNode: React.FC<NodeProps<FolderNodeType>> = React.memo(
   ({ data, selected }) => {
     return (
       <div
-        className={`min-w-[160px] rounded-lg border bg-worktree-sidebar shadow-sm ${
+        className={`size-full min-w-0 min-h-0 overflow-hidden rounded-lg border bg-worktree-sidebar shadow-sm ${
           selected ? 'border-blue-500' : 'border-worktree-sidebar-border'
         }`}
         role="button"

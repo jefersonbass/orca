@@ -50,7 +50,7 @@ export const TaskNode: React.FC<NodeProps<TaskNodeType>> = React.memo(
     const providerIcon = providerIcons[provider] ?? '📋'
     return (
       <div
-        className={`min-w-[200px] rounded-lg border bg-worktree-sidebar shadow-sm ${
+        className={`size-full min-w-0 min-h-0 overflow-hidden rounded-lg border bg-worktree-sidebar shadow-sm ${
           selected ? 'border-blue-500' : 'border-worktree-sidebar-border'
         }`}
         role="button"

@@ -12,7 +12,7 @@
 import { useCallback, useSyncExternalStore } from 'react'
 
 export type CanvasPortalTarget = {
-  paneKey: string
+  paneKey?: string
   tabId: string
   worktreeId: string
   target: HTMLElement

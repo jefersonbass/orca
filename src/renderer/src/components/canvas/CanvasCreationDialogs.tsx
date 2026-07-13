@@ -1,18 +1,20 @@
 import React, { useState } from 'react'
+import type { TuiAgent } from '../../../../shared/types'
 
 export type TerminalCreationDraft = {
   name: string
   command: string
   cwd: string
   monitorActivity: boolean
+  agent?: TuiAgent
 }
 
 const PRESETS = [
-  { id: 'claude', label: 'Claude Code', command: 'claude', name: 'Claude Code' },
-  { id: 'codex', label: 'Codex', command: 'codex', name: 'Codex' },
-  { id: 'gemini', label: 'Gemini CLI', command: 'gemini', name: 'Gemini CLI' },
-  { id: 'opencode', label: 'OpenCode', command: 'opencode', name: 'OpenCode' },
-  { id: 'shell', label: 'Shell', command: '', name: 'Shell' },
+  { id: 'claude', label: 'Claude Code', command: 'claude', name: 'Claude Code', agent: 'claude' as const },
+  { id: 'codex', label: 'Codex', command: 'codex', name: 'Codex', agent: 'codex' as const },
+  { id: 'gemini', label: 'Gemini CLI', command: 'gemini', name: 'Gemini CLI', agent: 'gemini' as const },
+  { id: 'opencode', label: 'OpenCode', command: 'opencode', name: 'OpenCode', agent: 'opencode' as const },
+  { id: 'shell', label: 'Shell', command: '', name: 'Shell', agent: undefined },
 ] as const
 
 export const NewTerminalDialog: React.FC<{
@@ -20,9 +22,11 @@ export const NewTerminalDialog: React.FC<{
   onCancel: () => void
   onCreate: (draft: TerminalCreationDraft) => void
 }> = ({ kind, onCancel, onCreate }) => {
-  const [preset, setPreset] = useState<(typeof PRESETS)[number]['id']>('shell')
-  const [name, setName] = useState('Shell')
-  const [command, setCommand] = useState('')
+  const initialPreset = PRESETS.find((item) => item.id === (kind === 'agent' ? 'codex' : 'shell')) ?? PRESETS[4]
+  const [preset, setPreset] = useState<(typeof PRESETS)[number]['id']>(initialPreset.id)
+  const [name, setName] = useState<string>(initialPreset.name)
+  const [command, setCommand] = useState<string>(initialPreset.command)
+  const [agent, setAgent] = useState<TuiAgent | undefined>(initialPreset.agent)
   const [cwd, setCwd] = useState('')
   const [monitorActivity, setMonitorActivity] = useState(true)
 
@@ -30,6 +34,7 @@ export const NewTerminalDialog: React.FC<{
     setPreset(next.id)
     setName(next.name)
     setCommand(next.command)
+    setAgent(next.agent)
   }
 
   return (
@@ -64,7 +69,7 @@ export const NewTerminalDialog: React.FC<{
 
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" onClick={onCancel} className="rounded-md px-3 py-2 text-xs text-worktree-sidebar-foreground/55 hover:bg-worktree-sidebar-foreground/8">Cancel</button>
-          <button type="button" disabled={!name.trim()} onClick={() => onCreate({ name: name.trim(), command, cwd, monitorActivity })} className="rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-40">Create {kind === 'agent' ? 'Agent' : 'Terminal'}</button>
+          <button type="button" disabled={!name.trim()} onClick={() => onCreate({ name: name.trim(), command, cwd, monitorActivity, agent })} className="rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-40">Create {kind === 'agent' ? 'Agent' : 'Terminal'}</button>
         </div>
       </div>
     </div>

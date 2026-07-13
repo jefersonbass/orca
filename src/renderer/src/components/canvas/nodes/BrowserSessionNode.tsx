@@ -15,7 +15,7 @@ export const BrowserSessionNode: React.FC<NodeProps<BrowserSessionNodeType>> = R
     const activePage = data.activePage ?? browserState.activePage
     return (
       <div
-        className={`min-w-[180px] rounded-lg border bg-worktree-sidebar shadow-sm ${
+        className={`size-full min-w-0 min-h-0 overflow-hidden rounded-lg border bg-worktree-sidebar shadow-sm ${
           selected ? 'border-blue-500' : 'border-worktree-sidebar-border'
         }`}
         role="button"

@@ -33,7 +33,7 @@ export const StickyNoteNode: React.FC<NodeProps<StickyNoteType>> = React.memo(
 
     return (
       <div
-        className={`min-w-[120px] min-h-[80px] rounded-lg border-2 p-0 shadow-sm ${
+        className={`size-full min-w-0 min-h-0 overflow-hidden rounded-lg border-2 p-0 shadow-sm ${
           !hasColor ? (selected ? 'border-blue-500' : 'border-transparent') : 'border-dashed'
         }`}
         style={{
@@ -47,7 +47,7 @@ export const StickyNoteNode: React.FC<NodeProps<StickyNoteType>> = React.memo(
         tabIndex={0}
       >
         <div className="rounded-t-md bg-yellow-600/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-yellow-950">{data.label || 'Sticky Note'}</div>
-        <div className="p-3">
+        <div className="h-[calc(100%-28px)] min-h-0 overflow-auto p-3">
           {editing ? (
             <textarea
               ref={inputRef}
@@ -63,7 +63,7 @@ export const StickyNoteNode: React.FC<NodeProps<StickyNoteType>> = React.memo(
                   persistText()
                 }
               }}
-              className="min-h-[56px] w-full resize-none bg-transparent text-[13px] outline-none"
+              className="size-full min-h-0 resize-none bg-transparent text-[13px] outline-none"
               style={{ color: textColor }}
               aria-label="Sticky note text"
             />

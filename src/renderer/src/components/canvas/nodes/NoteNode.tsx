@@ -59,7 +59,7 @@ export const NoteNode: React.FC<NodeProps<NoteNodeType>> = React.memo(
 
     return (
       <div
-        className={`min-w-[200px] min-h-[120px] rounded-lg border-2 bg-amber-50 shadow-sm ${
+        className={`size-full min-w-0 min-h-0 overflow-hidden rounded-lg border-2 bg-amber-50 shadow-sm ${
           selected && !hasColor ? 'border-blue-500' : hasColor ? 'border-dashed' : 'border-worktree-sidebar-border'
         }`}
         style={{
@@ -87,7 +87,7 @@ export const NoteNode: React.FC<NodeProps<NoteNodeType>> = React.memo(
             </span>
           )}
         </div>
-        <div className="overflow-auto px-3 py-2 text-amber-950" style={{ maxHeight: 'calc(100% - 36px)' }}>
+        <div className="h-[calc(100%-36px)] min-h-0 overflow-auto px-3 py-2 text-amber-950">
           {editing ? (
             <textarea
               ref={textareaRef}
@@ -95,7 +95,7 @@ export const NoteNode: React.FC<NodeProps<NoteNodeType>> = React.memo(
               onChange={(e) => setContent(e.target.value)}
               onBlur={handleBlur}
               onKeyDown={handleKeyDown}
-              className="min-h-[80px] w-full resize-none bg-transparent text-[13px] text-amber-950 outline-none"
+              className="size-full min-h-0 resize-none bg-transparent text-[13px] text-amber-950 outline-none"
               aria-label="Note content"
               placeholder="Write your note in markdown..."
             />

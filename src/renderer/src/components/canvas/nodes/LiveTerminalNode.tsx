@@ -28,6 +28,7 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
         ? resourceRef.tabId
         : paneKey?.split(':')[0]
     const worktreeId = resourceRef?.kind === 'terminal-tab' ? resourceRef.worktreeId : ''
+    const portalKey = paneKey ?? (tabId ? `canvas-tab:${tabId}` : undefined)
     const statusColor =
       data.status === 'connected'
         ? '#22c55e'
@@ -39,25 +40,25 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
 
     const borderColor = data.color ?? (selected ? '#3b82f6' : '#533483')
     const hasColor = !!data.color
-    const hasTerminal = !!paneKey
+    const hasTerminal = !!(paneKey || tabId)
 
     // Register portal target on mount, unregister on unmount
     useEffect(() => {
-      if (!paneKey || !tabId || !portalRef.current) return
+      if (!portalKey || !tabId || !portalRef.current) return
       const target = portalRef.current
       {
         const existing = getCanvasPortalTargets()
         setCanvasPortalTargets([
-          ...existing.filter((entry) => entry.paneKey !== paneKey),
+          ...existing.filter((entry) => entry.target !== target && entry.paneKey !== portalKey),
           { paneKey, tabId, worktreeId, target, active: true },
         ])
       }
 
       return () => {
-        const remaining = getCanvasPortalTargets().filter((t) => t.paneKey !== paneKey)
+        const remaining = getCanvasPortalTargets().filter((t) => t.target !== target)
         setCanvasPortalTargets(remaining)
       }
-    }, [paneKey, tabId, worktreeId])
+    }, [paneKey, portalKey, tabId, worktreeId])
 
     // Keyboard focus handler — focus the terminal on click
     const handleFocus = useCallback(() => {
@@ -67,7 +68,7 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
 
     return (
       <div
-        className={`min-w-[240px] min-h-[160px] rounded-lg border-2 bg-worktree-sidebar shadow-sm ${
+        className={`size-full min-w-0 min-h-0 overflow-hidden rounded-lg border-2 bg-worktree-sidebar shadow-sm ${
           selected ? 'border-blue-500' : hasColor ? 'border-dashed' : 'border-worktree-sidebar-border'
         }`}
         style={{
@@ -109,7 +110,7 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
           onClick={handleFocus}
           data-pane-key={paneKey}
         >
-          {!paneKey && (
+          {!hasTerminal && (
             <div className="flex flex-col items-center gap-2 px-4 text-center">
               <div className="text-xs text-worktree-sidebar-foreground/45">No terminal attached</div>
               <div className="text-[10px] text-worktree-sidebar-foreground/30">Add a terminal from the + menu to start working</div>

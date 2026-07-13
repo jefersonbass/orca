@@ -7,9 +7,11 @@ import { BindingInspector } from './BindingInspector'
 import { CanvasOrchestrationPanel } from './CanvasOrchestrationPanel'
 import { NewResourceDialog, NewTerminalDialog, type TerminalCreationDraft } from './CanvasCreationDialogs'
 import { useAppStore } from '@/store'
-import { createNewTerminalTab } from '@/components/terminal/terminal-tab-actions'
 import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
+import { runQuickCommandInNewTab } from '@/lib/run-quick-command-in-new-tab'
+import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
 import type { CanvasEdgeDocument, CanvasResourceReference, CanvasUndoAction } from '../../../../shared/canvas-types'
+import type { TuiAgent } from '../../../../shared/types'
 import type { AddNodeType } from './CanvasToolbar'
 import { CANVAS_DRAW_TO_ADD_NODE, type CanvasTool } from './canvas-tool-types'
 import { exportCanvasPng, exportCanvasSvg } from './canvas-export'
@@ -45,6 +47,7 @@ const CanvasPageInner: React.FC = () => {
   const [linkStartNodeId, setLinkStartNodeId] = useState<string | null>(null)
   const [terminalDraft, setTerminalDraft] = useState<{ kind: 'terminal' | 'agent'; rect: { x: number; y: number; width: number; height: number } } | null>(null)
   const [resourceDraft, setResourceDraft] = useState<{ kind: 'file' | 'folder' | 'browser'; rect: { x: number; y: number; width: number; height: number } } | null>(null)
+  const canvasRuntimeWorktreeId = activeWorktreeId ?? FLOATING_TERMINAL_WORKTREE_ID
   const nodeCount = storeCanvasDocument?.nodes?.length ?? 0
 
   // ── Persistence ──
@@ -103,43 +106,29 @@ const CanvasPageInner: React.FC = () => {
           y: 80 + Math.floor(doc.nodes.length / 3) * 380,
         }
         const appState = useAppStore.getState()
-        const activeTabId = appState.activeTabId
-        const tabs = activeWorktreeId ? (appState.tabsByWorktree[activeWorktreeId] ?? []) : []
-        const latestTab = tabs[tabs.length - 1]
-
-        // Resolve terminal tab reference
         let resourceRef: CanvasResourceReference | undefined = resourceRefOverride
-        if (type === 'live-terminal') {
-          if (latestTab) {
-            resourceRef = { kind: 'terminal-tab' as const, tabId: latestTab.id, worktreeId: activeWorktreeId ?? '' }
-          } else if (activeWorktreeId) {
-            createNewTerminalTab(activeWorktreeId)
-            const fresh = useAppStore.getState()
-            const freshTabs = fresh.tabsByWorktree[activeWorktreeId] ?? []
-            const freshTab = freshTabs[freshTabs.length - 1]
-            if (freshTab) resourceRef = { kind: 'terminal-tab' as const, tabId: freshTab.id, worktreeId: activeWorktreeId }
-          }
-        }
 
-        // Resolve agent reference
-        if (type === 'agent-terminal') {
-          const liveAgent = Object.values(appState.agentStatusByPaneKey).find((agent) => agent.tabId === activeTabId)
-            ?? Object.values(appState.agentStatusByPaneKey)[0]
-          if (liveAgent?.tabId) {
-            resourceRef = {
-              kind: 'agent-pane' as const,
-              tabId: liveAgent.tabId,
-              paneKey: liveAgent.paneKey,
-              ...(liveAgent.paneKey.startsWith(`${liveAgent.tabId}:`)
-                ? { leafId: liveAgent.paneKey.slice(liveAgent.tabId.length + 1) }
-                : {}),
-              worktreeId: liveAgent.worktreeId ?? activeWorktreeId ?? ''
-            }
-          } else if (activeWorktreeId) {
-            try {
-              launchAgentInNewTab({ agent: 'command-code', worktreeId: activeWorktreeId, launchSource: 'canvas' })
-            } catch { /* silent */ }
-          }
+        // Direct callers still get a real backing terminal/agent. The drawn
+        // creation flow passes its resourceRef explicitly, but the fallback
+        // keeps the empty-state and keyboard affordances functional too.
+        if (type === 'live-terminal' && !resourceRef) {
+          const command = typeof extraMetadata?.command === 'string' ? extraMetadata.command.trim() : ''
+          const cwd = typeof extraMetadata?.cwd === 'string' ? extraMetadata.cwd.trim() : ''
+          const result = command
+            ? runQuickCommandInNewTab({ command: { id: `canvas_${id}`, label: labelOverride ?? 'Canvas terminal', command, appendEnter: true }, worktreeId: canvasRuntimeWorktreeId })
+            : null
+          const tabId = result?.tabId ?? (() => {
+            const tab = appState.createTab(canvasRuntimeWorktreeId, undefined, undefined, cwd ? { startupCwd: cwd } : undefined)
+            appState.setActiveTabType('terminal')
+            return tab.id
+          })()
+          resourceRef = { kind: 'terminal-tab', tabId, worktreeId: canvasRuntimeWorktreeId }
+        }
+        if (type === 'agent-terminal' && !resourceRef) {
+          const requestedAgent = extraMetadata?.agent
+          const agent: TuiAgent = typeof requestedAgent === 'string' ? requestedAgent as TuiAgent : 'codex'
+          const result = launchAgentInNewTab({ agent, worktreeId: canvasRuntimeWorktreeId, launchSource: 'canvas' })
+          if (result?.tabId) resourceRef = { kind: 'terminal-tab', tabId: result.tabId, worktreeId: canvasRuntimeWorktreeId }
         }
 
         // Drawing type metadata
@@ -175,7 +164,7 @@ const CanvasPageInner: React.FC = () => {
       }
       syncDoc(base)
     },
-    [activeWorktreeId, syncDoc]
+    [canvasRuntimeWorktreeId, syncDoc]
   )
 
   const handleCreateRect = useCallback((tool: CanvasTool, rect: { x: number; y: number; width: number; height: number }) => {
@@ -212,14 +201,41 @@ const CanvasPageInner: React.FC = () => {
   const handleCreateTerminal = useCallback((draft: TerminalCreationDraft) => {
     if (!terminalDraft) return
     const type: AddNodeType = terminalDraft.kind === 'agent' ? 'agent-terminal' : 'live-terminal'
+    let resourceRef: CanvasResourceReference | undefined
+    if (terminalDraft.kind === 'agent') {
+      const result = launchAgentInNewTab({
+        agent: draft.agent ?? 'codex',
+        worktreeId: canvasRuntimeWorktreeId,
+        launchSource: 'canvas',
+      })
+      if (result?.tabId) {
+        resourceRef = { kind: 'terminal-tab', tabId: result.tabId, worktreeId: canvasRuntimeWorktreeId }
+      }
+    } else {
+      const command = draft.command.trim()
+      const result = command
+        ? runQuickCommandInNewTab({
+            command: { id: `canvas_${Date.now()}`, label: draft.name, command, appendEnter: true },
+            worktreeId: canvasRuntimeWorktreeId,
+          })
+        : null
+      const tabId = result?.tabId ?? (() => {
+        const state = useAppStore.getState()
+        const tab = state.createTab(canvasRuntimeWorktreeId, undefined, undefined, draft.cwd.trim() ? { startupCwd: draft.cwd.trim() } : undefined)
+        state.setActiveTabType('terminal')
+        return tab.id
+      })()
+      resourceRef = { kind: 'terminal-tab', tabId, worktreeId: canvasRuntimeWorktreeId }
+    }
     handleAddNode(type, { x: terminalDraft.rect.x, y: terminalDraft.rect.y }, { width: terminalDraft.rect.width, height: terminalDraft.rect.height }, {
       command: draft.command,
       cwd: draft.cwd,
       monitorActivity: draft.monitorActivity,
       preset: draft.name,
-    }, draft.name)
+      agent: draft.agent,
+    }, draft.name, resourceRef)
     setTerminalDraft(null)
-  }, [handleAddNode, terminalDraft])
+  }, [canvasRuntimeWorktreeId, handleAddNode, terminalDraft])
 
   const handleNodeDroppedOnFrame = useCallback((nodeId: string, frameId: string | null) => {
     if (!storeCanvasDocument || nodeId === frameId) return
@@ -460,7 +476,7 @@ const CanvasPageInner: React.FC = () => {
         onToolChange={handleToolChange}
       />
       {selectedNodeIds.length > 0 && (
-        <div className="absolute left-1/2 top-10 z-30 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-blue-400/30 bg-worktree-sidebar/95 px-1.5 py-1 shadow-xl backdrop-blur" role="toolbar" aria-label="Selected node actions">
+        <div className="absolute left-1/2 top-10 z-30 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-blue-400/30 bg-worktree-sidebar/95 px-1.5 py-1 shadow-xl backdrop-blur" role="toolbar" aria-label="Selected node actions" onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
           <button type="button" onClick={handleEditSelectedNode} className="rounded px-2 py-1 text-[11px] text-worktree-sidebar-foreground/70 hover:bg-worktree-sidebar-foreground/10" aria-label="Edit selected node">✎ Edit</button>
           <button type="button" onClick={() => { setLinkStartNodeId(selectedNodeIds[0]); handleToolChange('link') }} className="rounded px-2 py-1 text-[11px] text-blue-300 hover:bg-blue-500/15" aria-label="Link selected node">🔗 Link</button>
           <button type="button" onClick={handleRefreshSelectedNode} className="rounded px-2 py-1 text-[11px] text-worktree-sidebar-foreground/70 hover:bg-worktree-sidebar-foreground/10" aria-label="Refresh selected node">↻ Refresh</button>
@@ -608,9 +624,9 @@ const CanvasPageInner: React.FC = () => {
           <div className="pointer-events-none absolute inset-0">
             <div className="size-full">
               <CanvasEmptyState
-                onAddTerminal={() => handleAddNode('live-terminal')}
-                onAddAgent={() => handleAddNode('agent-terminal')}
-                onAddNote={() => handleAddNode('note')}
+          onAddTerminal={() => handleToolChange('terminal')}
+          onAddAgent={() => handleToolChange('agent')}
+          onAddNote={() => handleToolChange('note')}
               />
             </div>
           </div>
