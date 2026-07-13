@@ -15,6 +15,13 @@ test.describe('Spatial Canvas', () => {
     await orcaPage.getByRole('button', { name: 'Add node' }).click()
     await expect(orcaPage.getByRole('menuitem', { name: 'Add Terminal' })).toBeVisible()
     await orcaPage.getByRole('menuitem', { name: 'Add Note' }).click()
+    const pane = orcaPage.locator('.react-flow__pane')
+    const paneBox = await pane.boundingBox()
+    if (!paneBox) throw new Error('Canvas pane is not visible')
+    await orcaPage.mouse.move(paneBox.x + 120, paneBox.y + 120)
+    await orcaPage.mouse.down()
+    await orcaPage.mouse.move(paneBox.x + 440, paneBox.y + 320)
+    await orcaPage.mouse.up()
     await expect
       .poll(() =>
         orcaPage.evaluate(
@@ -49,6 +56,10 @@ test.describe('Spatial Canvas', () => {
 
     await orcaPage.getByRole('button', { name: 'Add node' }).click()
     await orcaPage.getByRole('menuitem', { name: 'Add Agent' }).click()
+    await orcaPage.mouse.move(paneBox.x + 520, paneBox.y + 120)
+    await orcaPage.mouse.down()
+    await orcaPage.mouse.move(paneBox.x + 900, paneBox.y + 360)
+    await orcaPage.mouse.up()
     await expect(orcaPage.locator('.react-flow__node-agent-terminal')).toHaveCount(1)
     await orcaPage.getByRole('button', { name: 'Fit view', exact: true }).click()
     await expect(orcaPage.locator('[aria-label^="Agent terminal:"]')).toBeVisible()

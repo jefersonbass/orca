@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
-import { Handle, Position } from '@xyflow/react'
 import { useAppStore } from '@/store'
+import { CanvasAnchors } from '../CanvasAnchors'
 
 type StickyNoteType = Node<
   { label: string; content?: string; color?: string },
@@ -9,12 +9,12 @@ type StickyNoteType = Node<
 >
 
 export const StickyNoteNode: React.FC<NodeProps<StickyNoteType>> = React.memo(
-  ({ id, data }) => {
+  ({ id, data, selected }) => {
     const [editing, setEditing] = useState(false)
     const [text, setText] = useState(data.content ?? '')
     const bgColor = data.color ?? '#fef08a'
     const textColor = isLight(bgColor) ? '#1a1a2e' : '#e8e8e8'
-    const inputRef = useRef<HTMLInputElement>(null)
+    const inputRef = useRef<HTMLTextAreaElement>(null)
     const setCanvasDocument = useAppStore((state) => state.setCanvasDocument)
     const persistText = () => {
       const document = useAppStore.getState().canvasDocument
@@ -28,46 +28,57 @@ export const StickyNoteNode: React.FC<NodeProps<StickyNoteType>> = React.memo(
       if (editing && inputRef.current) inputRef.current.focus()
     }, [editing])
 
+    const borderColor = data.color ?? (selected ? '#3b82f6' : 'transparent')
+    const hasColor = !!data.color
+
     return (
       <div
-        className="min-w-[120px] rounded-lg p-3 shadow-sm"
-        style={{ background: bgColor, color: textColor }}
+        className={`min-w-[120px] min-h-[80px] rounded-lg border-2 p-0 shadow-sm ${
+          !hasColor ? (selected ? 'border-blue-500' : 'border-transparent') : 'border-dashed'
+        }`}
+        style={{
+          background: bgColor,
+          color: textColor,
+          borderColor: hasColor ? borderColor : undefined,
+        }}
         onDoubleClick={() => setEditing(true)}
         role="textbox"
         aria-label={`Sticky note: ${data.label}`}
         tabIndex={0}
       >
-        {editing ? (
-          <input
-            ref={inputRef}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onBlur={() => {
-              setEditing(false)
-              persistText()
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
+        <div className="rounded-t-md bg-yellow-600/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-yellow-950">{data.label || 'Sticky Note'}</div>
+        <div className="p-3">
+          {editing ? (
+            <textarea
+              ref={inputRef}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onBlur={() => {
                 setEditing(false)
                 persistText()
-              }
-            }}
-            className="w-full bg-transparent text-[13px] outline-none"
-            style={{ color: textColor }}
-            aria-label="Sticky note text"
-          />
-        ) : (
-          <span
-            className="block cursor-text text-[13px] leading-relaxed"
-            style={{ color: textColor }}
-          >
-            {text || (
-              <span className="italic opacity-60">Double-click to edit…</span>
-            )}
-          </span>
-        )}
-        <Handle type="source" position={Position.Bottom} className="!opacity-0" />
-        <Handle type="target" position={Position.Top} className="!opacity-0" />
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setEditing(false)
+                  persistText()
+                }
+              }}
+              className="min-h-[56px] w-full resize-none bg-transparent text-[13px] outline-none"
+              style={{ color: textColor }}
+              aria-label="Sticky note text"
+            />
+          ) : (
+            <span
+              className="block cursor-text whitespace-pre-wrap text-[13px] leading-relaxed"
+              style={{ color: textColor }}
+            >
+              {text || (
+                <span className="italic opacity-60">Double-click to edit…</span>
+              )}
+            </span>
+          )}
+        </div>
+        <CanvasAnchors active={selected || !!text} />
       </div>
     )
   }

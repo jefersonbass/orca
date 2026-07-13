@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useAppStore } from '@/store'
 
-export const BindingInspector: React.FC = React.memo(() => {
+export const BindingInspector: React.FC<{ onClose?: () => void }> = React.memo(({ onClose }) => {
   const bindings = useAppStore((state) => state.canvasOrchestration.bindings)
   const removeCanvasBinding = useAppStore((state) => state.removeCanvasBinding)
   const [selected, setSelected] = useState<string | null>(null)
@@ -10,8 +10,13 @@ export const BindingInspector: React.FC = React.memo(() => {
 
   return (
     <div className="flex h-full flex-col" role="region" aria-label="Binding Inspector">
-      <div className="border-b border-worktree-sidebar-border px-3 py-2 text-[11px] font-medium text-worktree-sidebar-foreground/40 uppercase tracking-wider">
-        Operational Bindings ({bindings.length})
+      <div className="flex items-center justify-between border-b border-worktree-sidebar-border px-3 py-2 text-[11px] font-medium uppercase tracking-wider text-worktree-sidebar-foreground/40">
+        <span>Operational Bindings ({bindings.length})</span>
+        {onClose && (
+          <button type="button" onClick={onClose} className="rounded px-1 text-sm text-worktree-sidebar-foreground/45 hover:bg-worktree-sidebar-foreground/10 hover:text-worktree-sidebar-foreground" aria-label="Close operational bindings">
+            ×
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto">

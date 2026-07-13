@@ -11,6 +11,7 @@ type OrchestratorNodeType = Node<
       agentCount?: number
       taskCount?: number
     }
+    color?: string
   },
   'orchestrator'
 >
@@ -28,12 +29,17 @@ export const OrchestratorNode: React.FC<NodeProps<OrchestratorNodeType>> = React
     const st = statusStyles[data.data?.status ?? 'draft'] ?? statusStyles.draft
     const agentCount = data.data?.agentCount ?? 0
     const taskCount = data.data?.taskCount ?? 0
+    const borderColor = data.color ?? (selected ? '#3b82f6' : '#533483')
+    const hasColor = !!data.color
 
     return (
       <div
         className={`min-w-[220px] rounded-lg border-2 bg-worktree-sidebar shadow-sm ${
-          selected ? 'border-blue-500' : 'border-worktree-sidebar-border'
+          selected && !hasColor ? 'border-blue-500' : hasColor ? 'border-dashed' : 'border-worktree-sidebar-border'
         }`}
+        style={{
+          borderColor: hasColor ? borderColor : undefined,
+        }}
         role="region"
         aria-label={`Orchestrator: ${data.label}`}
         tabIndex={0}

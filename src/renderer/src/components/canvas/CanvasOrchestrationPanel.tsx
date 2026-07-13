@@ -5,7 +5,7 @@ import { approveCanvasOutput, deliverApprovedCanvasMessage, executableContextBin
 import { transitionCanvasMessage } from '../../../../shared/canvas-state-machines'
 import { createSpecificationCollaboration, specificationWorkflowCandidates, transitionCanvasCollaboration } from './canvas-collaboration-controller'
 
-export const CanvasOrchestrationPanel: React.FC = () => {
+export const CanvasOrchestrationPanel: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
   const orchestration = useAppStore((state) => state.canvasOrchestration)
   const upsertMessage = useAppStore((state) => state.upsertCanvasMessage)
   const contextBindings = executableContextBindings(orchestration.bindings)
@@ -35,7 +35,14 @@ export const CanvasOrchestrationPanel: React.FC = () => {
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-worktree-sidebar-border p-3">
-        <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-worktree-sidebar-foreground/40">Executable context</div>
+        <div className="mb-2 flex items-center justify-between text-[11px] font-medium uppercase tracking-wider text-worktree-sidebar-foreground/40">
+          <span>Executable context</span>
+          {onClose && (
+            <button type="button" onClick={onClose} className="rounded px-1 text-sm text-worktree-sidebar-foreground/45 hover:bg-worktree-sidebar-foreground/10 hover:text-worktree-sidebar-foreground" aria-label="Close executable context">
+              ×
+            </button>
+          )}
+        </div>
         {contextBindings.length === 0 ? (
           <p className="text-xs text-worktree-sidebar-foreground/40">Create a Note → Agent operational binding.</p>
         ) : contextBindings.map((binding) => (

@@ -12,6 +12,7 @@ type AgentTerminalNodeType = Node<
     provider?: string
     agentStatus?: 'working' | 'blocked' | 'waiting' | 'done' | 'idle' | 'disconnected'
     sessionId?: string
+    color?: string
   },
   'agent-terminal'
 >
@@ -34,16 +35,6 @@ const statusLabels: Record<string, string> = {
   disconnected: 'Disconnected',
 }
 
-/**
- * AgentTerminalNode renders an agent terminal surface inside a Canvas node.
- *
- * Like LiveTerminalNode, the actual xterm instance lives in the hidden host.
- * This node registers a portal target so the Terminal workbench can render
- * the terminal surface into it via createPortal.
- *
- * Additional status display shows the agent's current state (working, blocked,
- * waiting, done, etc.) using existing Orca agent status conventions.
- */
 export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
   React.memo(({ id, data, selected }) => {
     const portalRef = useRef<HTMLDivElement>(null)
@@ -59,6 +50,10 @@ export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
     const worktreeId = resourceRef?.kind === 'agent-pane' ? resourceRef.worktreeId : ''
     const statusColor = statusColors[data.agentStatus ?? 'idle'] ?? statusColors.idle
     const statusLabel = statusLabels[data.agentStatus ?? 'idle'] ?? 'Unknown'
+
+    const borderColor = data.color ?? (selected ? '#3b82f6' : '#533483')
+    const hasColor = !!data.color
+    const hasAgent = !!paneKey
 
     // Register portal target on mount
     useEffect(() => {
@@ -81,8 +76,11 @@ export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
     return (
       <div
         className={`min-w-[240px] min-h-[160px] rounded-lg border-2 bg-worktree-sidebar shadow-sm ${
-          selected ? 'border-blue-500' : 'border-worktree-sidebar-border'
+          selected ? 'border-blue-500' : hasColor ? 'border-dashed' : 'border-worktree-sidebar-border'
         }`}
+        style={{
+          borderColor: hasColor ? borderColor : undefined,
+        }}
         role="application"
         aria-label={`Agent terminal: ${data.label}, ${statusLabel}`}
         onClickCapture={(event) => {
@@ -120,11 +118,16 @@ export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
           onClick={handleFocus}
           data-pane-key={paneKey}
         >
-          {!paneKey && <div className="px-4 text-center text-xs text-worktree-sidebar-foreground/45">No live agent attached. Start an agent, then right-click this node to attach it.</div>}
+          {!paneKey && (
+            <div className="flex flex-col items-center gap-2 px-4 text-center">
+              <div className="text-xs text-worktree-sidebar-foreground/45">No live agent attached</div>
+              <div className="text-[10px] text-worktree-sidebar-foreground/30">Add an agent from the + menu to start working</div>
+            </div>
+          )}
         </div>
 
-        <Handle type="source" position={Position.Bottom} className="!size-3 !border-2 !border-blue-300 !bg-blue-500 !opacity-100" />
-        <Handle type="target" position={Position.Top} className="!size-3 !border-2 !border-emerald-300 !bg-emerald-500 !opacity-100" />
+        <Handle type="source" position={Position.Bottom} className={`!size-3 !border-2 !border-blue-300 !bg-blue-500 ${hasAgent ? '!opacity-100' : '!opacity-30'}`} />
+        <Handle type="target" position={Position.Top} className={`!size-3 !border-2 !border-emerald-300 !bg-emerald-500 ${hasAgent ? '!opacity-100' : '!opacity-30'}`} />
       </div>
     )
   })

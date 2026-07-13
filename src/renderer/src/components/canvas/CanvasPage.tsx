@@ -5,17 +5,21 @@ import { KnowledgeArtifactDialog } from './KnowledgeArtifactDialog'
 import { OperationalBindingDialog } from './OperationalBindingDialog'
 import { BindingInspector } from './BindingInspector'
 import { CanvasOrchestrationPanel } from './CanvasOrchestrationPanel'
-import { allowedBindingKinds } from './canvas-operational-graph'
+import { NewTerminalDialog, type TerminalCreationDraft } from './CanvasCreationDialogs'
 import { useAppStore } from '@/store'
+import { createNewTerminalTab } from '@/components/terminal/terminal-tab-actions'
+import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
+import type { CanvasEdgeDocument, CanvasUndoAction } from '../../../../shared/canvas-types'
+import type { AddNodeType } from './CanvasToolbar'
+import { CANVAS_DRAW_TO_ADD_NODE, type CanvasTool } from './canvas-tool-types'
+import { exportCanvasPng, exportCanvasSvg } from './canvas-export'
 
 const LEGACY_STORAGE_KEY = 'orca-canvas-document'
 
-// Lazy-load React Flow surface to avoid eager bundle loading
 const CanvasSurface = React.lazy(() =>
   import('./CanvasSurface').then((m) => ({ default: m.CanvasSurface }))
 )
 
-// Simple debounced save to localStorage (works across page navigations and reloads)
 function loadFromDisk<T>(): T | null {
   try {
     const raw = localStorage.getItem(LEGACY_STORAGE_KEY)
@@ -33,11 +37,11 @@ const CanvasPageInner: React.FC = () => {
   const activeWorkspaceKey = useAppStore((s) => s.activeWorkspaceKey)
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   const activeRepoId = useAppStore((s) => s.activeRepoId)
-  const undoStack = useAppStore((s) => s.undoStack)
   const agentStatusByPaneKey = useAppStore((s) => s.agentStatusByPaneKey)
   const reactFlowRef = useRef<any>(null)
   const [rfReady, setRfReady] = useState(false)
-  const [drawingMode, setDrawingMode] = useState(false)
+  const [activeTool, setActiveTool] = useState<CanvasTool>('select')
+  const [terminalDraft, setTerminalDraft] = useState<{ kind: 'terminal' | 'agent'; rect: { x: number; y: number; width: number; height: number } } | null>(null)
   const nodeCount = storeCanvasDocument?.nodes?.length ?? 0
 
   // ── Persistence ──
@@ -69,7 +73,7 @@ const CanvasPageInner: React.FC = () => {
     reactFlowRef.current = instance
   }, [])
 
-  // ── Viewport (throttled) ──
+  // ── Viewport ──
   const handleViewportChange = useCallback(
     (viewport: { x: number; y: number; zoom: number }) => {
       if (!storeCanvasDocument) return
@@ -78,8 +82,7 @@ const CanvasPageInner: React.FC = () => {
     [storeCanvasDocument, setCanvasDocument]
   )
 
-  // ── View actions ──
-  const handleFitView = useCallback(() => reactFlowRef.current?.fitView(), [])
+  const handleFitView = useCallback(() => reactFlowRef.current?.fitView({ padding: 0.15 }), [])
   const handleZoomIn = useCallback(() => reactFlowRef.current?.zoomIn(), [])
   const handleZoomOut = useCallback(() => reactFlowRef.current?.zoomOut(), [])
   const handleResetView = useCallback(() => {
@@ -89,54 +92,120 @@ const CanvasPageInner: React.FC = () => {
 
   // ── Add node ──
   const handleAddNode = useCallback(
-    (type: import('./CanvasToolbar').AddNodeType) => {
+    (type: AddNodeType, position?: { x: number; y: number }, size?: { width: number; height: number }, extraMetadata?: Record<string, unknown>, labelOverride?: string) => {
       const id = `node_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
       const base = (doc: NonNullable<typeof storeCanvasDocument>) => {
-        const pos = {
+        const pos = position ?? {
           x: 80 + (doc.nodes.length % 3) * 600,
           y: 80 + Math.floor(doc.nodes.length / 3) * 380,
         }
         const appState = useAppStore.getState()
         const activeTabId = appState.activeTabId
-        const activePane = activeTabId ? window.__paneManagers?.get(activeTabId)?.getActivePane?.() : undefined
-        const activePaneKey = activeTabId && activePane?.leafId ? `${activeTabId}:${activePane.leafId}` : undefined
-        const liveAgent = Object.values(appState.agentStatusByPaneKey).find((agent) => agent.tabId === activeTabId)
-          ?? Object.values(appState.agentStatusByPaneKey)[0]
-        const node: import('../../../../shared/canvas-types').CanvasNodeDocument = {
-          id,
-          type: type === 'drawing-freehand' || type === 'drawing-ellipse' || type === 'drawing-polygon'
-            ? 'drawing' as any
-            : type === 'sticky-note' ? 'sticky-note'
-            : type as any,
-          position: pos,
-          size: type === 'group' ? { width: 300, height: 200 }
-            : type === 'agent-terminal' || type === 'live-terminal' ? { width: 520, height: 320 }
-            : { width: 200, height: 100 },
-          zIndex: doc.nodes.length + 1,
-          label: type === 'live-terminal' ? 'Terminal'
-            : type === 'agent-terminal' ? liveAgent?.terminalTitle ?? liveAgent?.agentType ?? 'Agent'
-            : type.charAt(0).toUpperCase() + type.slice(1).replace('-', ' '),
-          ...(type === 'live-terminal' && activePaneKey
-            ? { resourceRef: { kind: 'live-terminal' as const, paneKey: activePaneKey } }
-            : {}),
-          ...(type === 'agent-terminal' && liveAgent?.tabId
-            ? { resourceRef: {
-                kind: 'agent-pane' as const,
-                tabId: liveAgent.tabId,
-                paneKey: liveAgent.paneKey,
-                ...(liveAgent.paneKey.startsWith(`${liveAgent.tabId}:`)
-                  ? { leafId: liveAgent.paneKey.slice(liveAgent.tabId.length + 1) }
-                  : {}),
-                worktreeId: liveAgent.worktreeId ?? activeWorktreeId ?? ''
-              } }
-            : {}),
+        const tabs = activeWorktreeId ? (appState.tabsByWorktree[activeWorktreeId] ?? []) : []
+        const latestTab = tabs[tabs.length - 1]
+
+        // Resolve terminal tab reference
+        let resourceRef: import('../../../../shared/canvas-types').CanvasResourceReference | undefined = undefined
+        if (type === 'live-terminal') {
+          if (latestTab) {
+            resourceRef = { kind: 'terminal-tab' as const, tabId: latestTab.id, worktreeId: activeWorktreeId ?? '' }
+          } else if (activeWorktreeId) {
+            createNewTerminalTab(activeWorktreeId)
+            const fresh = useAppStore.getState()
+            const freshTabs = fresh.tabsByWorktree[activeWorktreeId] ?? []
+            const freshTab = freshTabs[freshTabs.length - 1]
+            if (freshTab) resourceRef = { kind: 'terminal-tab' as const, tabId: freshTab.id, worktreeId: activeWorktreeId }
+          }
         }
-        return { ...doc, nodes: [...doc.nodes, node] }
+
+        // Resolve agent reference
+        if (type === 'agent-terminal') {
+          const liveAgent = Object.values(appState.agentStatusByPaneKey).find((agent) => agent.tabId === activeTabId)
+            ?? Object.values(appState.agentStatusByPaneKey)[0]
+          if (liveAgent?.tabId) {
+            resourceRef = {
+              kind: 'agent-pane' as const,
+              tabId: liveAgent.tabId,
+              paneKey: liveAgent.paneKey,
+              ...(liveAgent.paneKey.startsWith(`${liveAgent.tabId}:`)
+                ? { leafId: liveAgent.paneKey.slice(liveAgent.tabId.length + 1) }
+                : {}),
+              worktreeId: liveAgent.worktreeId ?? activeWorktreeId ?? ''
+            }
+          } else if (activeWorktreeId) {
+            try {
+              launchAgentInNewTab({ agent: 'command-code', worktreeId: activeWorktreeId, launchSource: 'canvas' })
+            } catch { /* silent */ }
+          }
+        }
+
+        // Drawing type metadata
+        let drawingMetadata: Record<string, unknown> | undefined = undefined
+        if (type === 'drawing-freehand') drawingMetadata = { drawingType: 'freehand' }
+        else if (type === 'drawing-ellipse') drawingMetadata = { drawingType: 'ellipse' }
+        else if (type === 'drawing-polygon') drawingMetadata = { drawingType: 'polygon' }
+
+        const nodeType = type === 'drawing-freehand' || type === 'drawing-ellipse' || type === 'drawing-polygon'
+          ? 'drawing' as const
+          : type === 'sticky-note' ? 'sticky-note' as const
+          : type === 'live-terminal' ? 'live-terminal' as const
+          : type === 'agent-terminal' ? 'agent-terminal' as const
+          : type as any
+
+        const node: Record<string, unknown> = {
+          id,
+          type: nodeType,
+          position: pos,
+          size: size ?? (type === 'group' ? { width: 300, height: 200 }
+            : type === 'agent-terminal' || type === 'live-terminal' ? { width: 520, height: 320 }
+            : { width: 200, height: 100 }),
+          zIndex: doc.nodes.length + 1,
+          label: labelOverride ?? (type === 'live-terminal' ? 'Terminal'
+            : type === 'agent-terminal' ? 'Agent'
+            : type.charAt(0).toUpperCase() + type.slice(1).replace('-', ' ').replace('drawing', 'Drawing')),
+        }
+        if (resourceRef) node.resourceRef = resourceRef
+        if (drawingMetadata || extraMetadata) node.metadata = { ...drawingMetadata, ...extraMetadata }
+        const store = useAppStore.getState()
+        store.pushUndo({ type: 'add-node', node: node as any })
+        return { ...doc, nodes: [...doc.nodes, node as any] }
       }
       syncDoc(base)
     },
     [activeWorktreeId, syncDoc]
   )
+
+  const handleCreateRect = useCallback((tool: CanvasTool, rect: { x: number; y: number; width: number; height: number }) => {
+    if (tool === 'terminal' || tool === 'agent') {
+      setTerminalDraft({ kind: tool, rect })
+      setActiveTool('select')
+      return
+    }
+    const nodeType = CANVAS_DRAW_TO_ADD_NODE[tool] as AddNodeType | undefined
+    if (!nodeType) return
+    handleAddNode(nodeType, { x: rect.x, y: rect.y }, { width: rect.width, height: rect.height })
+    setActiveTool('select')
+  }, [handleAddNode])
+
+  const handleCreateTerminal = useCallback((draft: TerminalCreationDraft) => {
+    if (!terminalDraft) return
+    const type: AddNodeType = terminalDraft.kind === 'agent' ? 'agent-terminal' : 'live-terminal'
+    handleAddNode(type, { x: terminalDraft.rect.x, y: terminalDraft.rect.y }, { width: terminalDraft.rect.width, height: terminalDraft.rect.height }, {
+      command: draft.command,
+      cwd: draft.cwd,
+      monitorActivity: draft.monitorActivity,
+      preset: draft.name,
+    }, draft.name)
+    setTerminalDraft(null)
+  }, [handleAddNode, terminalDraft])
+
+  const handleNodeDroppedOnFrame = useCallback((nodeId: string, frameId: string) => {
+    if (!storeCanvasDocument || nodeId === frameId) return
+    setCanvasDocument({
+      ...storeCanvasDocument,
+      nodes: storeCanvasDocument.nodes.map((node) => node.id === nodeId ? { ...node, groupId: frameId } : node),
+    })
+  }, [setCanvasDocument, storeCanvasDocument])
 
   // ── Context menu state ──
   const [nodeCtx, setNodeCtx] = useState<{ nodeId: string; x: number; y: number } | null>(null)
@@ -170,21 +239,13 @@ const CanvasPageInner: React.FC = () => {
     setNodeCtx(null)
   }, [activeWorktreeId, agentStatusByPaneKey, nodeCtx, setCanvasDocument, storeCanvasDocument])
 
-  const handleCreateOperationalBinding = useCallback(() => {
-    if (!edgeCtx || !storeCanvasDocument) return
-    const edge = storeCanvasDocument.edges.find((item) => item.id === edgeCtx.edgeId)
-    if (!edge) return
-    const source = storeCanvasDocument.nodes.find((node) => node.id === edge.sourceNodeId)
-    const target = storeCanvasDocument.nodes.find((node) => node.id === edge.targetNodeId)
-    if (!source || !target || allowedBindingKinds(source.type, target.type).length === 0) return
-    setBindingDraft({ sourceNodeId: source.id, targetNodeId: target.id, sourceType: source.type, targetType: target.type })
-    setEdgeCtx(null)
-  }, [edgeCtx, storeCanvasDocument])
+  // handleCreateOperationalBinding was removed — edge context menu handles bindings via edgeCtx
 
   // ── Edge creation ──
   const handleEdgeCreated = useCallback(
-    (edge: import('../../../../shared/canvas-types').CanvasEdgeDocument) => {
+    (edge: CanvasEdgeDocument) => {
       if (!storeCanvasDocument) return
+      useAppStore.getState().pushUndo({ type: 'add-edge', edge })
       setCanvasDocument({
         ...storeCanvasDocument,
         edges: [...(storeCanvasDocument.edges ?? []), edge],
@@ -194,15 +255,18 @@ const CanvasPageInner: React.FC = () => {
   )
 
   // ── Edge deletion ──
-  const handleDeleteEdge = useCallback(() => {
-    if (!edgeCtx || !storeCanvasDocument) return
+  const handleDeleteEdge = useCallback((edgeIdToDelete: string) => {
+    if (!storeCanvasDocument) return
     const edges = storeCanvasDocument.edges ?? []
+    const edge = edges.find((e) => e.id === edgeIdToDelete)
+    if (edge) useAppStore.getState().pushUndo({ type: 'remove-edge', edge })
     setCanvasDocument({
       ...storeCanvasDocument,
-      edges: edges.filter((e) => e.id !== edgeCtx.edgeId),
+      edges: edges.filter((e) => e.id !== edgeIdToDelete),
     })
     setEdgeCtx(null)
-  }, [edgeCtx, storeCanvasDocument, setCanvasDocument])
+    setNodeCtx(null)
+  }, [storeCanvasDocument, setCanvasDocument])
 
   // ── Edge type change ──
   const handleChangeEdgeType = useCallback(
@@ -224,46 +288,22 @@ const CanvasPageInner: React.FC = () => {
 
   // ── Undo / Redo ──
   const handleUndo = useCallback(() => {
-    const action = undoStack.past[undoStack.past.length - 1]
+    const stack = useAppStore.getState().undoStack
+    const action = stack.past[stack.past.length - 1]
     if (!action || !storeCanvasDocument) return
-    if (action.type === 'move-node') {
-      setCanvasDocument({
-        ...storeCanvasDocument,
-        nodes: storeCanvasDocument.nodes.map((n) =>
-          n.id === action.nodeId ? { ...n, position: action.from } : n
-        ),
-      })
-    }
-    if (action.type === 'resize-node') {
-      setCanvasDocument({
-        ...storeCanvasDocument,
-        nodes: storeCanvasDocument.nodes.map((n) =>
-          n.id === action.nodeId ? { ...n, size: action.from } : n
-        ),
-      })
-    }
-  }, [undoStack, storeCanvasDocument, setCanvasDocument])
+    const store = useAppStore.getState()
+    applyUndoAction(action, storeCanvasDocument, store)
+    store.undo()
+  }, [storeCanvasDocument])
 
   const handleRedo = useCallback(() => {
-    const action = undoStack.future[undoStack.future.length - 1]
+    const stack = useAppStore.getState().undoStack
+    const action = stack.future[stack.future.length - 1]
     if (!action || !storeCanvasDocument) return
-    if (action.type === 'move-node') {
-      setCanvasDocument({
-        ...storeCanvasDocument,
-        nodes: storeCanvasDocument.nodes.map((n) =>
-          n.id === action.nodeId ? { ...n, position: action.to } : n
-        ),
-      })
-    }
-    if (action.type === 'resize-node') {
-      setCanvasDocument({
-        ...storeCanvasDocument,
-        nodes: storeCanvasDocument.nodes.map((n) =>
-          n.id === action.nodeId ? { ...n, size: action.to } : n
-        ),
-      })
-    }
-  }, [undoStack, storeCanvasDocument, setCanvasDocument])
+    const store = useAppStore.getState()
+    applyRedoAction(action, storeCanvasDocument, store)
+    store.redo()
+  }, [storeCanvasDocument])
 
   const handleNodeContextMenu = useCallback(
     (evt: { nodeId: string; x: number; y: number }) => setNodeCtx(evt),
@@ -277,9 +317,16 @@ const CanvasPageInner: React.FC = () => {
 
   const handleDeleteNode = useCallback(() => {
     if (!nodeCtx || !storeCanvasDocument) return
+    const node = storeCanvasDocument.nodes.find((n) => n.id === nodeCtx.nodeId)
+    const edges = storeCanvasDocument.edges ?? []
+    const connectedEdges = edges.filter((e) => e.sourceNodeId === nodeCtx.nodeId || e.targetNodeId === nodeCtx.nodeId)
+    const store = useAppStore.getState()
+    if (node) store.pushUndo({ type: 'remove-node', node })
+    connectedEdges.forEach((e) => store.pushUndo({ type: 'remove-edge', edge: e }))
     setCanvasDocument({
       ...storeCanvasDocument,
       nodes: storeCanvasDocument.nodes.filter((n) => n.id !== nodeCtx.nodeId),
+      edges: edges.filter((e) => e.sourceNodeId !== nodeCtx.nodeId && e.targetNodeId !== nodeCtx.nodeId),
     })
     setNodeCtx(null)
   }, [nodeCtx, storeCanvasDocument, setCanvasDocument])
@@ -287,6 +334,10 @@ const CanvasPageInner: React.FC = () => {
   const handleNodeColor = useCallback(
     (color: string) => {
       if (!nodeCtx || !storeCanvasDocument) return
+      const node = storeCanvasDocument.nodes.find((n) => n.id === nodeCtx.nodeId)
+      if (!node) return
+      const store = useAppStore.getState()
+      store.pushUndo({ type: 'edit-node', nodeId: nodeCtx.nodeId, from: { color: node.color ?? '' }, to: { color: color || undefined } })
       setCanvasDocument({
         ...storeCanvasDocument,
         nodes: storeCanvasDocument.nodes.map((n) =>
@@ -298,12 +349,7 @@ const CanvasPageInner: React.FC = () => {
     [nodeCtx, storeCanvasDocument, setCanvasDocument]
   )
 
-  // ── Drawing mode ──
-  const handleToggleDrawingMode = useCallback(() => {
-    setDrawingMode((m) => !m)
-  }, [])
-
-  // ── Context menu lifecycle: close on outside click, escape ──
+  // ── Context menu lifecycle ──
   useEffect(() => {
     if (!nodeCtx && !edgeCtx) return
     const handler = (e: MouseEvent) => {
@@ -324,42 +370,24 @@ const CanvasPageInner: React.FC = () => {
 
   // ── Export ──
   const handleExportSvg = useCallback(() => {
-    const svg = document.querySelector('.react-flow__pane')?.parentElement
-    if (!svg) return
-    const html = svg.innerHTML
-    const blob = new Blob([html], { type: 'image/svg+xml' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = 'canvas-export.svg'; a.click()
-    URL.revokeObjectURL(url)
-  }, [])
+    if (storeCanvasDocument) exportCanvasSvg(storeCanvasDocument)
+  }, [storeCanvasDocument])
 
   const handleExportPng = useCallback(() => {
-    // Simple SVG-to-PNG: serialize SVG to canvas then download
-    const svgEl = document.querySelector('.react-flow__pane')?.parentElement?.querySelector('svg')
-    if (!svgEl) return
-    const svgData = new XMLSerializer().serializeToString(svgEl)
-    const canvas = document.createElement('canvas')
-    canvas.width = 1920; canvas.height = 1080
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    const img = new Image()
-    img.onload = () => {
-      ctx.drawImage(img, 0, 0)
-      const url = canvas.toDataURL('image/png')
-      const a = document.createElement('a')
-      a.href = url; a.download = 'canvas-export.png'; a.click()
-    }
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)))
-  }, [])
+    if (storeCanvasDocument) exportCanvasPng(storeCanvasDocument)
+  }, [storeCanvasDocument])
 
   const hasNodes = (storeCanvasDocument?.nodes?.length ?? 0) > 0
+  const connectedEdges = nodeCtx ? (storeCanvasDocument?.edges ?? []).filter(
+    (e) => e.sourceNodeId === nodeCtx.nodeId || e.targetNodeId === nodeCtx.nodeId
+  ) : []
 
   return (
     <div className="relative flex size-full flex-col overflow-hidden bg-worktree-sidebar">
       <CanvasToolbar
         nodeCount={nodeCount}
-        drawingMode={drawingMode}
+        showBindings={showBindingInspector}
+        showOrchestration={showOrchestration}
         onFitView={handleFitView}
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
@@ -367,21 +395,25 @@ const CanvasPageInner: React.FC = () => {
         onAddNode={handleAddNode}
         onUndo={handleUndo}
         onRedo={handleRedo}
-        onToggleDrawingMode={handleToggleDrawingMode}
         onExportSvg={handleExportSvg}
         onExportPng={handleExportPng}
+        onToggleBindings={() => setShowBindingInspector((v) => !v)}
+        onToggleOrchestration={() => setShowOrchestration((v) => !v)}
+        activeTool={activeTool}
+        onToolChange={setActiveTool}
       />
 
-
-      {/* Context menus */}
+      {/* Node context menu */}
       {nodeCtx && (
         <div
-          className="fixed z-[9999] min-w-[140px] rounded-lg border border-worktree-sidebar-border bg-worktree-sidebar py-1 shadow-lg"
+          className="fixed z-[9999] min-w-[180px] rounded-lg border border-worktree-sidebar-border bg-worktree-sidebar py-1 shadow-lg"
           style={{ left: nodeCtx.x, top: nodeCtx.y }}
           role="menu"
           aria-label="Node context menu"
         >
           <ColorSubmenu onColor={(c) => { handleNodeColor(c); setNodeCtx(null) }} />
+
+          {/* Attach live agent section */}
           {storeCanvasDocument?.nodes.find((node) => node.id === nodeCtx.nodeId)?.type === 'agent-terminal' && (
             <>
               <div className="border-t border-worktree-sidebar-border px-3 py-1 text-[10px] uppercase tracking-wider text-worktree-sidebar-foreground/30">
@@ -398,25 +430,54 @@ const CanvasPageInner: React.FC = () => {
               ))}
             </>
           )}
+
           <button
             onClick={() => { setShowSendToNote(true); setNodeCtx(null) }}
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-worktree-sidebar-foreground/70 transition-colors hover:bg-worktree-sidebar-foreground/5"
             role="menuitem"
           >📝 Send to Note</button>
+
+          {/* Connected edges section */}
+          {connectedEdges.length > 0 && (
+            <>
+              <div className="border-t border-worktree-sidebar-border px-3 py-1 text-[10px] font-medium text-worktree-sidebar-foreground/30 uppercase tracking-wider">
+                Connected edges ({connectedEdges.length})
+              </div>
+              {connectedEdges.map((edge) => {
+                const otherNodeId = edge.sourceNodeId === nodeCtx!.nodeId ? edge.targetNodeId : edge.sourceNodeId
+                const otherNode = storeCanvasDocument?.nodes.find((n) => n.id === otherNodeId)
+                const otherLabel = otherNode?.label ?? otherNodeId.slice(0, 8)
+                return (
+                  <div key={edge.id} className="flex items-center px-3 py-1">
+                    <span className="flex-1 truncate text-[11px] text-worktree-sidebar-foreground/50">
+                      {edge.sourceNodeId === nodeCtx!.nodeId ? '→' : '←'} {otherLabel}
+                    </span>
+                    <button
+                      onClick={() => { handleDeleteEdge(edge.id); setNodeCtx(null); }}
+                      className="text-[10px] text-red-400/60 hover:text-red-400"
+                      title="Delete edge"
+                    >✕</button>
+                  </div>
+                )
+              })}
+            </>
+          )}
+
           <div className="border-t border-worktree-sidebar-border" />
           <button
-            onClick={handleCreateOperationalBinding}
+            onClick={() => { setNodeCtx(null); setEdgeCtx({ edgeId: '', x: nodeCtx.x, y: nodeCtx.y }) }}
             className="flex w-full items-center px-3 py-1.5 text-left text-[13px] text-blue-400 transition-colors hover:bg-blue-500/10"
             role="menuitem"
           >Create Operational Binding</button>
           <button
             onClick={handleDeleteNode}
-            className="flex w-full items-center px-3 py-1.5 text-left text-[13px] text-red-400 transition-colors hover:bg-red-500/10"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-red-400 transition-colors hover:bg-red-500/10"
             role="menuitem"
-          >🗑 Delete</button>
+          >🗑 Delete Node</button>
         </div>
       )}
 
+      {/* Edge context menu */}
       {edgeCtx && (
         <div
           className="fixed z-[9999] min-w-[180px] rounded-lg border border-worktree-sidebar-border bg-worktree-sidebar py-1 shadow-lg"
@@ -441,49 +502,55 @@ const CanvasPageInner: React.FC = () => {
           ))}
           <div className="border-t border-worktree-sidebar-border" />
           <button
-            onClick={handleDeleteEdge}
+            onClick={() => edgeCtx?.edgeId && handleDeleteEdge(edgeCtx.edgeId)}
             className="flex w-full items-center px-3 py-1.5 text-left text-[13px] text-red-400 transition-colors hover:bg-red-500/10"
             role="menuitem"
           >🗑 Delete Edge</button>
         </div>
       )}
 
-      <div className="flex-1">
+      <div className="relative flex-1">
         {!rfReady && hasNodes && (
           <div className="flex size-full items-center justify-center">
-            <div className="text-sm text-worktree-sidebar-foreground/40">
-              Loading canvas…
-            </div>
+            <div className="text-sm text-worktree-sidebar-foreground/40">Loading canvas…</div>
           </div>
         )}
 
-        {hasNodes ? (
-          <React.Suspense
-            fallback={
-              <div className="flex size-full items-center justify-center">
-                <div className="text-sm text-worktree-sidebar-foreground/40">
-                  Loading canvas…
-                </div>
-              </div>
-            }
-          >
-            <CanvasSurface
-              nodes={storeCanvasDocument?.nodes ?? []}
-              edges={storeCanvasDocument?.edges ?? []}
-              onViewportChange={handleViewportChange}
-              onInit={handleInit}
-              onReactFlowReady={handleReactFlowReady}
-              onNodeContextMenu={handleNodeContextMenu}
-              onEdgeContextMenu={handleEdgeContextMenu}
-              onEdgeCreated={handleEdgeCreated}
-            />
-          </React.Suspense>
-        ) : (
-          <CanvasEmptyState />
+        <React.Suspense
+          fallback={
+            <div className="flex size-full items-center justify-center">
+              <div className="text-sm text-worktree-sidebar-foreground/40">Loading canvas…</div>
+            </div>
+          }
+        >
+          <CanvasSurface
+            nodes={storeCanvasDocument?.nodes ?? []}
+            edges={storeCanvasDocument?.edges ?? []}
+            activeTool={activeTool}
+            onCreateRect={handleCreateRect}
+            onNodeDroppedOnFrame={handleNodeDroppedOnFrame}
+            onViewportChange={handleViewportChange}
+            onInit={handleInit}
+            onReactFlowReady={handleReactFlowReady}
+            onNodeContextMenu={handleNodeContextMenu}
+            onEdgeContextMenu={handleEdgeContextMenu}
+            onEdgeCreated={handleEdgeCreated}
+          />
+        </React.Suspense>
+        {!hasNodes && (
+          <div className="pointer-events-none absolute inset-0">
+            <div className="size-full">
+              <CanvasEmptyState
+                onAddTerminal={() => handleAddNode('live-terminal')}
+                onAddAgent={() => handleAddNode('agent-terminal')}
+                onAddNote={() => handleAddNode('note')}
+              />
+            </div>
+          </div>
         )}
       </div>
 
-      {/* Send to Note dialog */}
+      {/* Dialogs and panels */}
       {showSendToNote && storeCanvasDocument && (
         <KnowledgeArtifactDialog
           source={{ sourceType: 'terminal-output', sourceId: 'canvas', sourceLabel: 'Canvas Node', author: 'user', authorType: 'user' }}
@@ -494,23 +561,15 @@ const CanvasPageInner: React.FC = () => {
           onClose={() => setShowSendToNote(false)}
         />
       )}
-      <button
-        type="button"
-        onClick={() => setShowBindingInspector((value) => !value)}
-        className="absolute right-4 top-4 z-40 rounded-lg border border-worktree-sidebar-border bg-worktree-sidebar/95 px-3 py-2 text-xs text-worktree-sidebar-foreground shadow-lg backdrop-blur"
-      >Bindings</button>
-      <button type="button" onClick={() => setShowOrchestration((value) => !value)}
-        className="absolute right-28 top-4 z-40 rounded-lg border border-worktree-sidebar-border bg-worktree-sidebar/95 px-3 py-2 text-xs text-worktree-sidebar-foreground shadow-lg backdrop-blur">
-        Orchestrate
-      </button>
+
       {showBindingInspector && (
         <div className="absolute bottom-4 right-4 top-14 z-40 w-[340px] rounded-xl border border-worktree-sidebar-border bg-worktree-sidebar shadow-2xl">
-          <BindingInspector />
+          <BindingInspector onClose={() => setShowBindingInspector(false)} />
         </div>
       )}
       {showOrchestration && (
         <div className="absolute bottom-4 right-4 top-14 z-40 w-[420px] rounded-xl border border-worktree-sidebar-border bg-worktree-sidebar shadow-2xl">
-          <CanvasOrchestrationPanel />
+          <CanvasOrchestrationPanel onClose={() => setShowOrchestration(false)} />
         </div>
       )}
       {bindingDraft && (
@@ -520,8 +579,123 @@ const CanvasPageInner: React.FC = () => {
           onCreated={() => { setBindingDraft(null); setShowBindingInspector(true) }}
         />
       )}
+      {terminalDraft && (
+        <NewTerminalDialog
+          kind={terminalDraft.kind}
+          onCancel={() => setTerminalDraft(null)}
+          onCreate={handleCreateTerminal}
+        />
+      )}
     </div>
   )
+}
+
+// ── Undo action apply helpers ──
+
+function applyUndoAction(
+  action: CanvasUndoAction,
+  document: NonNullable<ReturnType<typeof useAppStore.getState>['canvasDocument']>,
+  store: ReturnType<typeof useAppStore.getState>
+): void {
+  switch (action.type) {
+    case 'move-node':
+      store.setCanvasDocument({
+        ...document,
+        nodes: document.nodes.map((n) => n.id === action.nodeId ? { ...n, position: action.from } : n)
+      })
+      break
+    case 'resize-node':
+      store.setCanvasDocument({
+        ...document,
+        nodes: document.nodes.map((n) => n.id === action.nodeId ? { ...n, size: action.from } : n)
+      })
+      break
+    case 'add-node':
+      store.setCanvasDocument({
+        ...document,
+        nodes: document.nodes.filter((n) => n.id !== action.node.id)
+      })
+      break
+    case 'remove-node':
+      store.setCanvasDocument({
+        ...document,
+        nodes: [...document.nodes, action.node]
+      })
+      break
+    case 'add-edge':
+      store.setCanvasDocument({
+        ...document,
+        edges: (document.edges ?? []).filter((e) => e.id !== action.edge.id)
+      })
+      break
+    case 'remove-edge':
+      store.setCanvasDocument({
+        ...document,
+        edges: [...(document.edges ?? []), action.edge]
+      })
+      break
+    case 'edit-node':
+      store.setCanvasDocument({
+        ...document,
+        nodes: document.nodes.map((n) =>
+          n.id === action.nodeId ? { ...n, ...action.from } : n
+        )
+      })
+      break
+  }
+}
+
+function applyRedoAction(
+  action: CanvasUndoAction,
+  document: NonNullable<ReturnType<typeof useAppStore.getState>['canvasDocument']>,
+  store: ReturnType<typeof useAppStore.getState>
+): void {
+  switch (action.type) {
+    case 'move-node':
+      store.setCanvasDocument({
+        ...document,
+        nodes: document.nodes.map((n) => n.id === action.nodeId ? { ...n, position: action.to } : n)
+      })
+      break
+    case 'resize-node':
+      store.setCanvasDocument({
+        ...document,
+        nodes: document.nodes.map((n) => n.id === action.nodeId ? { ...n, size: action.to } : n)
+      })
+      break
+    case 'add-node':
+      store.setCanvasDocument({
+        ...document,
+        nodes: [...document.nodes, action.node]
+      })
+      break
+    case 'remove-node':
+      store.setCanvasDocument({
+        ...document,
+        nodes: document.nodes.filter((n) => n.id !== action.node.id)
+      })
+      break
+    case 'add-edge':
+      store.setCanvasDocument({
+        ...document,
+        edges: [...(document.edges ?? []), action.edge]
+      })
+      break
+    case 'remove-edge':
+      store.setCanvasDocument({
+        ...document,
+        edges: (document.edges ?? []).filter((e) => e.id !== action.edge.id)
+      })
+      break
+    case 'edit-node':
+      store.setCanvasDocument({
+        ...document,
+        nodes: document.nodes.map((n) =>
+          n.id === action.nodeId ? { ...n, ...action.to } : n
+        )
+      })
+      break
+  }
 }
 
 // ── Relationship Types ──

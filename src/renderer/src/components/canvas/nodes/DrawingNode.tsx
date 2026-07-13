@@ -1,5 +1,6 @@
 import React from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
+import { CanvasAnchors } from '../CanvasAnchors'
 
 type DrawingNodeType = Node<
   {
@@ -11,17 +12,19 @@ type DrawingNodeType = Node<
     fillColor?: string
     opacity?: number
     lineStyle?: 'solid' | 'dashed' | 'dotted'
+    color?: string
   },
   'drawing'
 >
 
 export const DrawingNode: React.FC<NodeProps<DrawingNodeType>> = React.memo(
-  ({ data }) => {
-    const strokeColor = data.strokeColor ?? '#533483'
+  ({ data, selected }) => {
+    const strokeColor = data.strokeColor ?? data.color ?? '#533483'
     const strokeWidth = data.strokeWidth ?? 2
     const fillColor = data.fillColor ?? 'transparent'
     const opacity = data.opacity ?? 1
     const lineStyle = data.lineStyle ?? 'solid'
+    const hasColor = !!data.color
 
     const strokeDasharray =
       lineStyle === 'dashed' ? '6 3' : lineStyle === 'dotted' ? '2 2' : undefined
@@ -74,14 +77,24 @@ export const DrawingNode: React.FC<NodeProps<DrawingNodeType>> = React.memo(
     }
 
     return (
-      <svg
-        className="size-full"
-        style={{ minWidth: 40, minHeight: 40, overflow: 'visible' }}
+      <div
+        className={`size-full rounded-lg border-2 bg-worktree-sidebar/20 ${
+          selected ? 'border-blue-500' : hasColor ? 'border-dashed' : 'border-worktree-sidebar-border'
+        }`}
+        style={{
+          borderColor: hasColor ? data.color : undefined,
+        }}
         role="img"
-        aria-label={data.drawingType === 'freehand' ? 'Freehand drawing' : `${data.drawingType} shape`}
+        aria-label={`${data.drawingType ?? 'Drawing'} shape`}
       >
-        {renderShape()}
-      </svg>
+        <svg
+          className="size-full"
+          style={{ minWidth: 40, minHeight: 40, overflow: 'visible' }}
+        >
+          {renderShape()}
+        </svg>
+        <CanvasAnchors active={selected} />
+      </div>
     )
   }
 )

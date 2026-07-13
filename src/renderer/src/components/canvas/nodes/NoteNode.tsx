@@ -1,9 +1,20 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
-import { Handle, Position } from '@xyflow/react'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { useAppStore } from '@/store'
+import { CanvasAnchors } from '../CanvasAnchors'
 
 type NoteNodeType = Node<{ label: string; content?: string; color?: string }, 'note'>
+
+// Simple markdown component for note display
+const NoteMarkdown: React.FC<{ content: string }> = ({ content }) => (
+  <div className="prose prose-sm max-w-none text-amber-950">
+    <Markdown remarkPlugins={[remarkGfm]}>
+      {content}
+    </Markdown>
+  </div>
+)
 
 export const NoteNode: React.FC<NodeProps<NoteNodeType>> = React.memo(
   ({ id, data, selected }) => {
@@ -42,12 +53,18 @@ export const NoteNode: React.FC<NodeProps<NoteNodeType>> = React.memo(
       [persistContent]
     )
 
+    const borderColor = data.color ?? (selected ? '#3b82f6' : undefined)
+    const hasColor = !!data.color
+    const isEmpty = !content || content.trim() === ''
+
     return (
       <div
-        className={`min-w-[200px] rounded-lg border-2 bg-worktree-sidebar shadow-sm ${
-          selected ? 'border-blue-500' : 'border-worktree-sidebar-border'
+        className={`min-w-[200px] min-h-[120px] rounded-lg border-2 bg-amber-50 shadow-sm ${
+          selected && !hasColor ? 'border-blue-500' : hasColor ? 'border-dashed' : 'border-worktree-sidebar-border'
         }`}
-        style={{ borderColor: data.color ?? (selected ? '#3b82f6' : undefined) }}
+        style={{
+          borderColor: hasColor ? borderColor : undefined,
+        }}
         onDoubleClick={handleDoubleClick}
         role="textbox"
         aria-label={`Note: ${data.label}`}
@@ -60,10 +77,17 @@ export const NoteNode: React.FC<NodeProps<NoteNodeType>> = React.memo(
         aria-multiline="true"
         tabIndex={0}
       >
-        <div className="border-b border-worktree-sidebar-border px-3 py-1.5 text-[11px] font-medium text-worktree-sidebar-foreground/50">
-          {data.label || 'Note'}
+        <div className="flex items-center gap-2 border-b border-amber-300 bg-amber-200 px-3 py-1.5">
+          <span className="text-[11px] font-medium text-amber-950/75">
+            {data.label || 'Note'}
+          </span>
+          {!editing && !isEmpty && (
+              <span className="ml-auto text-[9px] text-amber-950/45">
+              Double-click to edit
+            </span>
+          )}
         </div>
-        <div className="px-3 py-2">
+        <div className="overflow-auto px-3 py-2 text-amber-950" style={{ maxHeight: 'calc(100% - 36px)' }}>
           {editing ? (
             <textarea
               ref={textareaRef}
@@ -71,21 +95,19 @@ export const NoteNode: React.FC<NodeProps<NoteNodeType>> = React.memo(
               onChange={(e) => setContent(e.target.value)}
               onBlur={handleBlur}
               onKeyDown={handleKeyDown}
-              className="min-h-[60px] w-full resize-none bg-transparent text-[13px] text-worktree-sidebar-foreground outline-none"
+              className="min-h-[80px] w-full resize-none bg-transparent text-[13px] text-amber-950 outline-none"
               aria-label="Note content"
+              placeholder="Write your note in markdown..."
             />
-          ) : (
-            <div className="min-h-[24px] whitespace-pre-wrap text-[13px] text-worktree-sidebar-foreground/80">
-              {content || (
-                <span className="text-worktree-sidebar-foreground/30 italic">
-                  Double-click to edit…
-                </span>
-              )}
+          ) : isEmpty ? (
+            <div className="min-h-[24px] whitespace-pre-wrap text-[13px] text-amber-950/45 italic">
+              Double-click to edit…
             </div>
+          ) : (
+            <NoteMarkdown content={content} />
           )}
         </div>
-        <Handle type="source" position={Position.Bottom} className="!size-3 !border-2 !border-blue-300 !bg-blue-500 !opacity-100" />
-        <Handle type="target" position={Position.Top} className="!size-3 !border-2 !border-emerald-300 !bg-emerald-500 !opacity-100" />
+        <CanvasAnchors active={selected || !!content} />
       </div>
     )
   }

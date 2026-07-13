@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ReactFlow,
-  Controls,
   Background,
+  BackgroundVariant,
   MiniMap,
   useNodesState,
   useEdgesState,
@@ -11,7 +11,6 @@ import {
   ViewportPortal,
   type Node,
   type Edge,
-  type BackgroundVariant,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { TerminalSummaryNode } from './TerminalSummaryNode'
@@ -37,6 +36,7 @@ import { VisualEdge } from './VisualEdge'
 import { ArrowEdge } from './ArrowEdge'
 import type { CanvasNodeDocument, CanvasEdgeDocument } from '../../../../shared/canvas-types'
 import { useAppStore } from '@/store'
+import type { CanvasTool } from './canvas-tool-types'
 
 // ── Node type registry ──
 interface NodeContextMenuEvent {
@@ -101,12 +101,20 @@ const CanvasEdgeOverlay: React.FC<{ nodes: CanvasNodeDocument[]; edges: CanvasEd
         const source = nodes.find((node) => node.id === edge.sourceNodeId)
         const target = nodes.find((node) => node.id === edge.targetNodeId)
         if (!source || !target) return null
-        const sourceX = source.position.x + source.size.width / 2
-        const sourceY = source.position.y + source.size.height
-        const targetX = target.position.x + target.size.width / 2
-        const targetY = target.position.y
+        const sourceCenter = { x: source.position.x + source.size.width / 2, y: source.position.y + source.size.height / 2 }
+        const targetCenter = { x: target.position.x + target.size.width / 2, y: target.position.y + target.size.height / 2 }
+        const horizontal = Math.abs(targetCenter.x - sourceCenter.x) > Math.abs(targetCenter.y - sourceCenter.y)
+        const sourceRight = targetCenter.x >= sourceCenter.x
+        const targetRight = targetCenter.x >= sourceCenter.x
+        const sourceX = horizontal ? source.position.x + (sourceRight ? source.size.width : 0) : sourceCenter.x
+        const sourceY = horizontal ? sourceCenter.y : source.position.y + (targetCenter.y >= sourceCenter.y ? source.size.height : 0)
+        const targetX = horizontal ? target.position.x + (targetRight ? 0 : target.size.width) : targetCenter.x
+        const targetY = horizontal ? targetCenter.y : target.position.y + (targetCenter.y >= sourceCenter.y ? 0 : target.size.height)
         const bend = Math.max(80, Math.abs(targetY - sourceY) * 0.5)
-        return <path key={edge.id} className="canvas-edge-path" d={`M ${sourceX} ${sourceY} C ${sourceX} ${sourceY + bend}, ${targetX} ${targetY - bend}, ${targetX} ${targetY}`} fill="none" stroke="#60a5fa" strokeWidth={3} strokeLinecap="round" />
+        const path = horizontal
+          ? `M ${sourceX} ${sourceY} C ${sourceX + (sourceRight ? bend : -bend)} ${sourceY}, ${targetX + (sourceRight ? -bend : bend)} ${targetY}, ${targetX} ${targetY}`
+          : `M ${sourceX} ${sourceY} C ${sourceX} ${sourceY + (targetCenter.y >= sourceCenter.y ? bend : -bend)}, ${targetX} ${targetY - (targetCenter.y >= sourceCenter.y ? bend : -bend)}, ${targetX} ${targetY}`
+        return <path key={edge.id} className="canvas-edge-path" d={path} fill="none" stroke="#60a5fa" strokeWidth={3} strokeLinecap="round" />
       })}
     </svg>
   </ViewportPortal>
@@ -117,12 +125,13 @@ export type CanvasSurfaceProps = {
   edges?: CanvasEdgeDocument[]
   onViewportChange: (viewport: { x: number; y: number; zoom: number }) => void
   onInit: (instance: { fitView: () => void; zoomIn: () => void; zoomOut: () => void; zoomTo: (zoom: number) => void }) => void
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onReactFlowReady: (instance: any) => void
   onNodeContextMenu?: (event: NodeContextMenuEvent) => void
   onEdgeContextMenu?: (event: EdgeContextMenuEvent) => void
   onEdgeCreated?: (edge: import('../../../../shared/canvas-types').CanvasEdgeDocument) => void
-  /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
+  onNodeDroppedOnFrame?: (nodeId: string, frameId: string) => void
+  activeTool?: CanvasTool
+  onCreateRect?: (tool: CanvasTool, rect: { x: number; y: number; width: number; height: number }) => void
 }
 
 
@@ -135,9 +144,29 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   onNodeContextMenu,
   onEdgeContextMenu,
   onEdgeCreated,
+  onNodeDroppedOnFrame,
+  activeTool = 'select',
+  onCreateRect,
 }) => {
   const [connecting, setConnecting] = useState(false)
+  const [drawing, setDrawing] = useState<{ x: number; y: number } | null>(null)
+  const [draftRect, setDraftRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
+  const reactFlowInstanceRef = useRef<any>(null)
   const pendingClickSourceRef = useRef<string | null>(null)
+  const [isDark, setIsDark] = useState(true)
+
+  // Detect theme from CSS custom property
+  useEffect(() => {
+    const checkTheme = () => {
+      const bg = getComputedStyle(document.documentElement).getPropertyValue('--worktree-sidebar').trim()
+      setIsDark(bg.startsWith('#') ? parseInt(bg.slice(1, 3), 16) < 128 : true)
+    }
+    checkTheme()
+    const observer = new MutationObserver(checkTheme)
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] })
+    return () => observer.disconnect()
+  }, [])
+
   const initialNodes = canvasDocumentNodes.map((docNode) => ({
     id: docNode.id,
     type: docNode.type,
@@ -159,7 +188,7 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
 
   const [flowNodes, setFlowNodes] = useNodesState<Node>(initialNodes)
   const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   useEffect(() => {
     setFlowNodes(canvasDocumentNodes.map((docNode) => ({
       id: docNode.id, type: docNode.type, position: docNode.position,
@@ -202,7 +231,7 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
       return next
     })
   }, [setFlowNodes])
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   const onEdgesChangeAny = onEdgesChange as any
 
   const onViewportChangeHandler = useCallback(
@@ -213,8 +242,8 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   )
 
   const onInitHandler = useCallback(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (instance: any) => {
+      reactFlowInstanceRef.current = instance
       onReactFlowReady(instance)
       onInit({
         fitView: () => instance.fitView(),
@@ -225,6 +254,77 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     },
     [onInit, onReactFlowReady]
   )
+
+  const snap = useCallback((value: number) => Math.round(value / 20) * 20, [])
+  const toCanvasPoint = useCallback((event: any) => {
+    const instance = reactFlowInstanceRef.current
+    if (instance?.screenToFlowPosition) {
+      const point = instance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      return { x: snap(point.x), y: snap(point.y) }
+    }
+    const viewport = instance?.getViewport?.() ?? { x: 0, y: 0, zoom: 1 }
+    return {
+      x: snap((event.clientX - viewport.x) / viewport.zoom),
+      y: snap((event.clientY - viewport.y) / viewport.zoom),
+    }
+  }, [snap])
+
+  const updateDraftRect = useCallback((start: { x: number; y: number }, current: { x: number; y: number }) => {
+    setDraftRect({
+      x: Math.min(start.x, current.x),
+      y: Math.min(start.y, current.y),
+      width: Math.abs(current.x - start.x),
+      height: Math.abs(current.y - start.y),
+    })
+  }, [])
+
+  const onPaneMouseDown = useCallback((event: any) => {
+    if (activeTool === 'select' || activeTool === 'link' || event.button !== 0) return
+    const start = toCanvasPoint(event)
+    setDrawing(start)
+    setDraftRect({ x: start.x, y: start.y, width: 0, height: 0 })
+  }, [activeTool, toCanvasPoint])
+
+  const onPaneMouseMove = useCallback((event: any) => {
+    if (!drawing) return
+    updateDraftRect(drawing, toCanvasPoint(event))
+  }, [drawing, toCanvasPoint, updateDraftRect])
+
+  const finishDrawing = useCallback(() => {
+    if (!drawing || !draftRect) return
+    const completedRect = draftRect
+    setDrawing(null)
+    setDraftRect(null)
+    if (completedRect.width < 40 || completedRect.height < 40) return
+    onCreateRect?.(activeTool, completedRect)
+  }, [activeTool, draftRect, drawing, onCreateRect])
+
+  const onPaneMouseUp = useCallback(() => finishDrawing(), [finishDrawing])
+
+  const onNodeDragStop = useCallback((_event: any, node: any) => {
+    if (node.type === 'group') return
+    const center = {
+      x: node.position.x + (node.width ?? node.measured?.width ?? 0) / 2,
+      y: node.position.y + (node.height ?? node.measured?.height ?? 0) / 2,
+    }
+    const frame = canvasDocumentNodes.find((candidate) => {
+      if (candidate.type !== 'group' || candidate.id === node.id) return false
+      return center.x >= candidate.position.x && center.x <= candidate.position.x + candidate.size.width
+        && center.y >= candidate.position.y && center.y <= candidate.position.y + candidate.size.height
+    })
+    if (frame) onNodeDroppedOnFrame?.(node.id, frame.id)
+  }, [canvasDocumentNodes, onNodeDroppedOnFrame])
+
+  useEffect(() => {
+    if (!drawing) return
+    const cancelDrawing = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setDrawing(null)
+      setDraftRect(null)
+    }
+    window.addEventListener('keydown', cancelDrawing)
+    return () => window.removeEventListener('keydown', cancelDrawing)
+  }, [drawing])
 
   const createEdge = useCallback((source: string, target: string) => {
     if (!source || !target || source === target) return
@@ -276,6 +376,9 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     }
   }, [createEdge])
 
+  // Grid color based on theme
+  const gridColor = isDark ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.06)'
+
   const flowProps: Record<string, unknown> = {
     nodes: flowNodes,
     edges: flowEdges,
@@ -290,6 +393,9 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     maxZoom: 5,
     snapToGrid: true,
     snapGrid: [20, 20],
+    nodesResizable: true,
+    nodesFocusable: true,
+    edgesFocusable: true,
     deleteKeyCode: 'Delete',
     multiSelectionKeyCode: 'Shift',
     selectionOnDrag: true,
@@ -313,20 +419,38 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     defaultEdgeOptions: { type: 'default', style: { stroke: '#60a5fa', strokeWidth: 2.5 } },
     connectionLineStyle: { stroke: '#60a5fa', strokeWidth: 3 },
     connectionLineType: 'bezier',
-    colorMode: 'dark',
-    className: 'bg-worktree-sidebar',
+    colorMode: isDark ? 'dark' : 'light',
+    className: 'canvas-flow',
+    panOnDrag: activeTool === 'select',
+    onPaneMouseDown,
+    onPaneMouseMove,
+    onPaneMouseUp,
+    onNodeDragStop,
   }
   return (
-    <div className="relative size-full overflow-hidden bg-worktree-sidebar">
+    <div className="relative size-full overflow-hidden" style={{ background: isDark ? '#1a1a2e' : '#f5f5f5' }}>
       {connecting && (
         <div className="pointer-events-none absolute left-1/2 top-3 z-50 -translate-x-1/2 rounded-full border border-blue-400/40 bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-300 shadow-lg backdrop-blur">
           Connecting… drag or click a target handle
         </div>
       )}
       {React.createElement(ReactFlow as any, flowProps,
+        React.createElement(Background, {
+          variant: BackgroundVariant.Lines,
+          gap: 20,
+          size: 1,
+          color: gridColor,
+        }),
         React.createElement(CanvasEdgeOverlay, { nodes: canvasDocumentNodes, edges: canvasEdges }),
-        React.createElement(Controls, { showInteractive: false, className: '!border-worktree-sidebar-border !bg-worktree-sidebar [&>button]:!border-worktree-sidebar-border [&>button]:!bg-worktree-sidebar [&>button]:!fill-worktree-sidebar-foreground [&>button:hover]:!bg-worktree-sidebar-foreground/10' }),
-        React.createElement(Background, { variant: 'dots' as BackgroundVariant, gap: 20, size: 1, color: 'rgba(148, 163, 184, 0.24)' }),
+        draftRect && React.createElement(ViewportPortal, null,
+          React.createElement('div', {
+            className: 'pointer-events-none absolute rounded-md border-2 border-blue-400 bg-blue-400/10 shadow-[0_0_0_1px_rgba(96,165,250,0.2)]',
+            style: { left: draftRect.x, top: draftRect.y, width: draftRect.width, height: draftRect.height },
+            'aria-label': `New ${activeTool} ${draftRect.width} by ${draftRect.height}`,
+          },
+          React.createElement('span', { className: 'absolute -top-6 left-0 rounded bg-blue-500 px-1.5 py-0.5 text-[10px] text-white' }, `${draftRect.width} × ${draftRect.height}`)
+          )
+        ),
         React.createElement(MiniMap, {
           nodeColor: (node: any) => {
             if (node.selected) return '#e94560'
@@ -337,7 +461,7 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
             if (node.type === 'terminal-summary') return '#0f3460'
             return '#533483'
           },
-          maskColor: 'rgba(0,0,0,0.3)',
+          maskColor: isDark ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.1)',
           pannable: true,
           zoomable: true,
           ariaLabel: 'Canvas minimap',
