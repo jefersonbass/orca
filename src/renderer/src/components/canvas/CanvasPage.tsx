@@ -91,8 +91,17 @@ const CanvasPageInner: React.FC = () => {
   const handleAddNode = useCallback(
     (type: import('./CanvasToolbar').AddNodeType) => {
       const id = `node_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
-      const pos = { x: Math.random() * 300, y: Math.random() * 200 }
       const base = (doc: NonNullable<typeof storeCanvasDocument>) => {
+        const pos = {
+          x: 80 + (doc.nodes.length % 3) * 600,
+          y: 80 + Math.floor(doc.nodes.length / 3) * 380,
+        }
+        const appState = useAppStore.getState()
+        const activeTabId = appState.activeTabId
+        const activePane = activeTabId ? window.__paneManagers?.get(activeTabId)?.getActivePane?.() : undefined
+        const activePaneKey = activeTabId && activePane?.leafId ? `${activeTabId}:${activePane.leafId}` : undefined
+        const liveAgent = Object.values(appState.agentStatusByPaneKey).find((agent) => agent.tabId === activeTabId)
+          ?? Object.values(appState.agentStatusByPaneKey)[0]
         const node: import('../../../../shared/canvas-types').CanvasNodeDocument = {
           id,
           type: type === 'drawing-freehand' || type === 'drawing-ellipse' || type === 'drawing-polygon'
@@ -101,16 +110,32 @@ const CanvasPageInner: React.FC = () => {
             : type as any,
           position: pos,
           size: type === 'group' ? { width: 300, height: 200 }
-            : type === 'agent-terminal' ? { width: 520, height: 320 }
+            : type === 'agent-terminal' || type === 'live-terminal' ? { width: 520, height: 320 }
             : { width: 200, height: 100 },
           zIndex: doc.nodes.length + 1,
-          label: type.charAt(0).toUpperCase() + type.slice(1).replace('-', ' '),
+          label: type === 'live-terminal' ? 'Terminal'
+            : type === 'agent-terminal' ? liveAgent?.terminalTitle ?? liveAgent?.agentType ?? 'Agent'
+            : type.charAt(0).toUpperCase() + type.slice(1).replace('-', ' '),
+          ...(type === 'live-terminal' && activePaneKey
+            ? { resourceRef: { kind: 'live-terminal' as const, paneKey: activePaneKey } }
+            : {}),
+          ...(type === 'agent-terminal' && liveAgent?.tabId
+            ? { resourceRef: {
+                kind: 'agent-pane' as const,
+                tabId: liveAgent.tabId,
+                paneKey: liveAgent.paneKey,
+                ...(liveAgent.paneKey.startsWith(`${liveAgent.tabId}:`)
+                  ? { leafId: liveAgent.paneKey.slice(liveAgent.tabId.length + 1) }
+                  : {}),
+                worktreeId: liveAgent.worktreeId ?? activeWorktreeId ?? ''
+              } }
+            : {}),
         }
         return { ...doc, nodes: [...doc.nodes, node] }
       }
       syncDoc(base)
     },
-    [syncDoc]
+    [activeWorktreeId, syncDoc]
   )
 
   // ── Context menu state ──
@@ -331,7 +356,7 @@ const CanvasPageInner: React.FC = () => {
   const hasNodes = (storeCanvasDocument?.nodes?.length ?? 0) > 0
 
   return (
-    <div className="flex size-full flex-col">
+    <div className="relative flex size-full flex-col overflow-hidden bg-worktree-sidebar">
       <CanvasToolbar
         nodeCount={nodeCount}
         drawingMode={drawingMode}
@@ -472,19 +497,19 @@ const CanvasPageInner: React.FC = () => {
       <button
         type="button"
         onClick={() => setShowBindingInspector((value) => !value)}
-        className="fixed right-4 bottom-4 z-40 rounded-lg border border-worktree-sidebar-border bg-worktree-sidebar px-3 py-2 text-xs text-worktree-sidebar-foreground shadow-lg"
+        className="absolute right-4 top-4 z-40 rounded-lg border border-worktree-sidebar-border bg-worktree-sidebar/95 px-3 py-2 text-xs text-worktree-sidebar-foreground shadow-lg backdrop-blur"
       >Bindings</button>
       <button type="button" onClick={() => setShowOrchestration((value) => !value)}
-        className="fixed right-28 bottom-4 z-40 rounded-lg border border-worktree-sidebar-border bg-worktree-sidebar px-3 py-2 text-xs text-worktree-sidebar-foreground shadow-lg">
+        className="absolute right-28 top-4 z-40 rounded-lg border border-worktree-sidebar-border bg-worktree-sidebar/95 px-3 py-2 text-xs text-worktree-sidebar-foreground shadow-lg backdrop-blur">
         Orchestrate
       </button>
       {showBindingInspector && (
-        <div className="fixed right-4 bottom-14 z-40 h-[420px] w-[340px] rounded-xl border border-worktree-sidebar-border bg-worktree-sidebar shadow-2xl">
+        <div className="absolute bottom-4 right-4 top-14 z-40 w-[340px] rounded-xl border border-worktree-sidebar-border bg-worktree-sidebar shadow-2xl">
           <BindingInspector />
         </div>
       )}
       {showOrchestration && (
-        <div className="fixed right-4 top-20 z-40 h-[620px] w-[420px] rounded-xl border border-worktree-sidebar-border bg-worktree-sidebar shadow-2xl">
+        <div className="absolute bottom-4 right-4 top-14 z-40 w-[420px] rounded-xl border border-worktree-sidebar-border bg-worktree-sidebar shadow-2xl">
           <CanvasOrchestrationPanel />
         </div>
       )}

@@ -13,6 +13,7 @@ test.describe('Spatial Canvas', () => {
     await expect(orcaPage.getByRole('toolbar', { name: 'Canvas controls' })).toBeVisible()
 
     await orcaPage.getByRole('button', { name: 'Add node' }).click()
+    await expect(orcaPage.getByRole('menuitem', { name: 'Add Terminal' })).toBeVisible()
     await orcaPage.getByRole('menuitem', { name: 'Add Note' }).click()
     await expect
       .poll(() =>
@@ -51,6 +52,19 @@ test.describe('Spatial Canvas', () => {
     await expect(orcaPage.locator('.react-flow__node-agent-terminal')).toHaveCount(1)
     await orcaPage.getByRole('button', { name: 'Fit view', exact: true }).click()
     await expect(orcaPage.locator('[aria-label^="Agent terminal:"]')).toBeVisible()
+    const agentCard = orcaPage.locator('[aria-label^="Agent terminal:"]')
+    await orcaPage.locator('.react-flow__node-note .react-flow__handle.source').evaluate((element: HTMLElement) => element.click())
+    await expect(orcaPage.getByText('Connecting… drag or click a target handle')).toBeVisible()
+    await orcaPage.locator('.react-flow__node-agent-terminal .react-flow__handle.target').evaluate((element: HTMLElement) => element.click())
+    await expect.poll(() => orcaPage.evaluate(() => window.__store?.getState().canvasDocument?.edges.length)).toBe(1)
+    const persistedEdge = await orcaPage.evaluate(() => window.__store?.getState().canvasDocument?.edges[0])
+    expect(persistedEdge?.sourceNodeId).not.toBe(persistedEdge?.targetNodeId)
+    await expect(orcaPage.locator('.canvas-edge-path')).toHaveCount(1)
+
+    const canvasBackground = await orcaPage.locator('.react-flow').evaluate((element) => getComputedStyle(element).backgroundColor)
+    expect(canvasBackground).not.toBe('rgb(255, 255, 255)')
+    const zoomButtonBackground = await orcaPage.locator('.react-flow__controls-button').first().evaluate((element) => getComputedStyle(element).backgroundColor)
+    expect(zoomButtonBackground).not.toBe('rgb(255, 255, 255)')
 
     const originalKey = await getStoreState<string>(orcaPage, 'activeWorkspaceKey')
     await orcaPage.evaluate(() => {

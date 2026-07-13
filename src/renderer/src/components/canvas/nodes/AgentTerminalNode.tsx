@@ -45,7 +45,7 @@ const statusLabels: Record<string, string> = {
  * waiting, done, etc.) using existing Orca agent status conventions.
  */
 export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
-  React.memo(({ data, selected }) => {
+  React.memo(({ id, data, selected }) => {
     const portalRef = useRef<HTMLDivElement>(null)
     const resourceRef = data.resourceRef
     const paneKey =
@@ -85,6 +85,12 @@ export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
         }`}
         role="application"
         aria-label={`Agent terminal: ${data.label}, ${statusLabel}`}
+        onClickCapture={(event) => {
+          const handle = (event.target as HTMLElement).closest('.react-flow__handle')
+          if (!handle) return
+          const handleType = handle.classList.contains('source') ? 'source' : 'target'
+          window.dispatchEvent(new CustomEvent('orca:canvas-handle-click', { detail: { nodeId: id, handleType } }))
+        }}
         tabIndex={0}
       >
         {/* Header */}
@@ -110,13 +116,15 @@ export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
         {/* Portal target — agent terminal xterm surface renders here */}
         <div
           ref={portalRef}
-          className="h-[calc(100%-32px)] w-full"
+          className="flex h-[calc(100%-32px)] w-full items-center justify-center"
           onClick={handleFocus}
           data-pane-key={paneKey}
-        />
+        >
+          {!paneKey && <div className="px-4 text-center text-xs text-worktree-sidebar-foreground/45">No live agent attached. Start an agent, then right-click this node to attach it.</div>}
+        </div>
 
-        <Handle type="source" position={Position.Bottom} className="!opacity-0" />
-        <Handle type="target" position={Position.Top} className="!opacity-0" />
+        <Handle type="source" position={Position.Bottom} className="!size-3 !border-2 !border-blue-300 !bg-blue-500 !opacity-100" />
+        <Handle type="target" position={Position.Top} className="!size-3 !border-2 !border-emerald-300 !bg-emerald-500 !opacity-100" />
       </div>
     )
   })

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ReactFlow,
   Controls,
@@ -7,6 +7,8 @@ import {
   useNodesState,
   useEdgesState,
   applyNodeChanges,
+  addEdge,
+  ViewportPortal,
   type Node,
   type Edge,
   type BackgroundVariant,
@@ -74,6 +76,7 @@ const nodeTypes = {
 
 // ── Edge type registry ──
 const edgeTypes = {
+  'canvas-link': SemanticEdge,
   visual: VisualEdge,
   related: VisualEdge,
   'depends-on': SemanticEdge,
@@ -90,6 +93,24 @@ const edgeTypes = {
   'assigned-to': SemanticEdge,
   'owned-by': SemanticEdge,
 }
+
+const CanvasEdgeOverlay: React.FC<{ nodes: CanvasNodeDocument[]; edges: CanvasEdgeDocument[] }> = ({ nodes, edges }) => (
+  <ViewportPortal>
+    <svg className="pointer-events-none absolute left-0 top-0 size-px overflow-visible" aria-label="Canvas connections">
+      {edges.map((edge) => {
+        const source = nodes.find((node) => node.id === edge.sourceNodeId)
+        const target = nodes.find((node) => node.id === edge.targetNodeId)
+        if (!source || !target) return null
+        const sourceX = source.position.x + source.size.width / 2
+        const sourceY = source.position.y + source.size.height
+        const targetX = target.position.x + target.size.width / 2
+        const targetY = target.position.y
+        const bend = Math.max(80, Math.abs(targetY - sourceY) * 0.5)
+        return <path key={edge.id} className="canvas-edge-path" d={`M ${sourceX} ${sourceY} C ${sourceX} ${sourceY + bend}, ${targetX} ${targetY - bend}, ${targetX} ${targetY}`} fill="none" stroke="#60a5fa" strokeWidth={3} strokeLinecap="round" />
+      })}
+    </svg>
+  </ViewportPortal>
+)
 
 export type CanvasSurfaceProps = {
   nodes: CanvasNodeDocument[]
@@ -115,6 +136,8 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   onEdgeContextMenu,
   onEdgeCreated,
 }) => {
+  const [connecting, setConnecting] = useState(false)
+  const pendingClickSourceRef = useRef<string | null>(null)
   const initialNodes = canvasDocumentNodes.map((docNode) => ({
     id: docNode.id,
     type: docNode.type,
@@ -130,7 +153,7 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     id: e.id,
     source: e.sourceNodeId,
     target: e.targetNodeId,
-    type: e.relationship ?? 'visual',
+    type: 'default',
     data: { relationship: e.relationship, comment: e.comment },
   }))
 
@@ -144,6 +167,16 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
       data: { ...docNode, ...docNode.metadata } as any, selected: false
     })))
   }, [canvasDocumentNodes, setFlowNodes])
+
+  useEffect(() => {
+    setFlowEdges(canvasEdges.map((edge) => ({
+      id: edge.id,
+      source: edge.sourceNodeId,
+      target: edge.targetNodeId,
+      type: 'default',
+      data: { relationship: edge.relationship, comment: edge.comment },
+    })))
+  }, [canvasEdges, setFlowEdges])
 
   const onNodesChangeAny = useCallback((changes: any[]) => {
     setFlowNodes((current) => {
@@ -193,6 +226,56 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     [onInit, onReactFlowReady]
   )
 
+  const createEdge = useCallback((source: string, target: string) => {
+    if (!source || !target || source === target) return
+    const now = new Date().toISOString()
+    const edgeId = `edge_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+    setFlowEdges((edges) => addEdge({
+      id: edgeId,
+      source,
+      target,
+      type: 'default',
+      data: { relationship: 'depends-on', createdBy: 'user', timestamp: now },
+    }, edges))
+    onEdgeCreated?.({
+      id: edgeId,
+      sourceNodeId: source,
+      targetNodeId: target,
+      relationship: 'depends-on',
+      type: 'depends-on',
+    })
+  }, [onEdgeCreated, setFlowEdges])
+
+  useEffect(() => {
+    const applyClickConnection = (detail: { nodeId: string; handleType: 'source' | 'target' }) => {
+      if (detail.handleType === 'source') {
+        pendingClickSourceRef.current = detail.nodeId
+        setConnecting(true)
+        return
+      }
+      const source = pendingClickSourceRef.current
+      if (!source) return
+      createEdge(source, detail.nodeId)
+      pendingClickSourceRef.current = null
+      setConnecting(false)
+    }
+    const handleClickConnection = (event: Event) => {
+      applyClickConnection((event as CustomEvent<{ nodeId: string; handleType: 'source' | 'target' }>).detail)
+    }
+    const handleNativeHandleClick = (event: MouseEvent) => {
+      const handle = (event.target as HTMLElement | null)?.closest<HTMLElement>('.react-flow__handle')
+      const nodeId = handle?.dataset.nodeid
+      if (!handle || !nodeId) return
+      applyClickConnection({ nodeId, handleType: handle.classList.contains('source') ? 'source' : 'target' })
+    }
+    window.addEventListener('orca:canvas-handle-click', handleClickConnection)
+    document.addEventListener('click', handleNativeHandleClick, true)
+    return () => {
+      window.removeEventListener('orca:canvas-handle-click', handleClickConnection)
+      document.removeEventListener('click', handleNativeHandleClick, true)
+    }
+  }, [createEdge])
+
   const flowProps: Record<string, unknown> = {
     nodes: flowNodes,
     edges: flowEdges,
@@ -221,34 +304,29 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
       onEdgeContextMenu?.({ edgeId: edge.id, x: event.clientX, y: event.clientY })
     },
     onConnect: (connection: any) => {
+      setConnecting(false)
       if (!connection.source || !connection.target) return
-      const now = new Date().toISOString()
-      const edgeId = `edge_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
-      const newEdge: Edge = {
-        id: edgeId,
-        source: connection.source,
-        target: connection.target,
-        type: 'depends-on',
-        data: { relationship: 'depends-on', createdBy: 'user', timestamp: now },
-      }
-      setFlowEdges((eds) => [...eds, newEdge])
-      onEdgeCreated?.({
-        id: edgeId,
-        sourceNodeId: connection.source,
-        targetNodeId: connection.target,
-        relationship: 'depends-on',
-        type: 'depends-on',
-      })
+      createEdge(connection.source, connection.target)
     },
-    defaultEdgeOptions: { type: 'depends-on' },
-    connectionLineStyle: { stroke: '#533483', strokeWidth: 1.5 },
+    onConnectStart: () => setConnecting(true),
+    onConnectEnd: () => { if (!pendingClickSourceRef.current) setConnecting(false) },
+    defaultEdgeOptions: { type: 'default', style: { stroke: '#60a5fa', strokeWidth: 2.5 } },
+    connectionLineStyle: { stroke: '#60a5fa', strokeWidth: 3 },
     connectionLineType: 'bezier',
+    colorMode: 'dark',
+    className: 'bg-worktree-sidebar',
   }
   return (
-    <div style={{ width: '100%', height: '100%' }}>
+    <div className="relative size-full overflow-hidden bg-worktree-sidebar">
+      {connecting && (
+        <div className="pointer-events-none absolute left-1/2 top-3 z-50 -translate-x-1/2 rounded-full border border-blue-400/40 bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-300 shadow-lg backdrop-blur">
+          Connecting… drag or click a target handle
+        </div>
+      )}
       {React.createElement(ReactFlow as any, flowProps,
-        React.createElement(Controls, { showInteractive: false }),
-        React.createElement(Background, { variant: 'dots' as BackgroundVariant, gap: 20, size: 1 }),
+        React.createElement(CanvasEdgeOverlay, { nodes: canvasDocumentNodes, edges: canvasEdges }),
+        React.createElement(Controls, { showInteractive: false, className: '!border-worktree-sidebar-border !bg-worktree-sidebar [&>button]:!border-worktree-sidebar-border [&>button]:!bg-worktree-sidebar [&>button]:!fill-worktree-sidebar-foreground [&>button:hover]:!bg-worktree-sidebar-foreground/10' }),
+        React.createElement(Background, { variant: 'dots' as BackgroundVariant, gap: 20, size: 1, color: 'rgba(148, 163, 184, 0.24)' }),
         React.createElement(MiniMap, {
           nodeColor: (node: any) => {
             if (node.selected) return '#e94560'

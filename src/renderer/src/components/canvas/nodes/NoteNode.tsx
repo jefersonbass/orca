@@ -51,6 +51,12 @@ export const NoteNode: React.FC<NodeProps<NoteNodeType>> = React.memo(
         onDoubleClick={handleDoubleClick}
         role="textbox"
         aria-label={`Note: ${data.label}`}
+        onClickCapture={(event) => {
+          const handle = (event.target as HTMLElement).closest('.react-flow__handle')
+          if (!handle) return
+          const handleType = handle.classList.contains('source') ? 'source' : 'target'
+          window.dispatchEvent(new CustomEvent('orca:canvas-handle-click', { detail: { nodeId: id, handleType } }))
+        }}
         aria-multiline="true"
         tabIndex={0}
       >
@@ -78,8 +84,8 @@ export const NoteNode: React.FC<NodeProps<NoteNodeType>> = React.memo(
             </div>
           )}
         </div>
-        <Handle type="source" position={Position.Bottom} className="!opacity-40" />
-        <Handle type="target" position={Position.Top} className="!opacity-40" />
+        <Handle type="source" position={Position.Bottom} className="!size-3 !border-2 !border-blue-300 !bg-blue-500 !opacity-100" />
+        <Handle type="target" position={Position.Top} className="!size-3 !border-2 !border-emerald-300 !bg-emerald-500 !opacity-100" />
       </div>
     )
   }
