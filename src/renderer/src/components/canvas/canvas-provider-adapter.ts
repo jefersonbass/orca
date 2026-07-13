@@ -259,5 +259,29 @@ function formatAgentInstruction(message: AgentCanvasMessage): string {
   const routeContext = routes.length > 0
     ? `\n\nCanvas orchestration routes available from this agent:\n${routes.join('\n')}\nUse the linked route when this instruction asks you to delegate or report work; the target node id is included above.`
     : ''
-  return `[${heading} from ${message.fromAgentId ?? 'user'}]\n\n${message.content}${context}${routeContext}`
+  const incomingContext = state.canvasOrchestration.bindings
+    .filter((binding) => binding.enabled)
+    .flatMap((binding) => {
+      if (binding.kind !== 'context' || binding.targetAgentNodeId !== message.toAgentId) return []
+      const source = state.canvasDocument?.nodes.find((node) => node.id === binding.sourceNodeId)
+      const sourceContent = typeof source?.metadata?.content === 'string'
+        ? source.metadata.content
+        : typeof source?.metadata?.text === 'string'
+          ? source.metadata.text
+          : source?.label ?? binding.sourceNodeId
+      return [`- ${source?.type ?? 'context'} ${source?.label ?? binding.sourceNodeId} (${binding.sourceNodeId}): ${sourceContent}`]
+    })
+  const linkedAgents = state.canvasOrchestration.bindings
+    .filter((binding) => binding.enabled)
+    .flatMap((binding) => {
+      if ((binding.kind !== 'delegation' && binding.kind !== 'reporting') || binding.sourceAgentNodeId !== message.toAgentId) return []
+      const target = state.canvasDocument?.nodes.find((node) => node.id === binding.targetAgentNodeId)
+      return [`${target?.label ?? binding.targetAgentNodeId} (${binding.targetAgentNodeId})`]
+    })
+  const links = [
+    ...incomingContext.map((entry) => `${entry.split(': ')[0]} -> ${message.toAgentId}`),
+    ...linkedAgents.map((target) => `${message.toAgentId} -> ${target}`)
+  ]
+  const canvasEnvelope = `\n\nOrca Canvas context (authoritative for this turn; do not infer it from the shell environment):\nORCA_NOTE=${JSON.stringify(incomingContext.join('\n'))}\nORCA_AGENTS=${JSON.stringify(linkedAgents.join(', '))}\nORCA_LINKS=${JSON.stringify(links.join('; '))}${incomingContext.length > 0 ? `\n\nLinked Canvas content:\n${incomingContext.join('\n')}` : ''}`
+  return `[${heading} from ${message.fromAgentId ?? 'user'}]\n\n${message.content}${context}${routeContext}${canvasEnvelope}`
 }

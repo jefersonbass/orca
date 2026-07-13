@@ -146,7 +146,7 @@ const CanvasPageInner: React.FC = () => {
           const command = typeof extraMetadata?.command === 'string' ? extraMetadata.command.trim() : ''
           const cwd = typeof extraMetadata?.cwd === 'string' ? extraMetadata.cwd.trim() : ''
           const result = command
-            ? runQuickCommandInNewTab({ command: { id: `canvas_${id}`, label: labelOverride ?? 'Canvas terminal', command, appendEnter: true }, worktreeId: canvasRuntimeWorktreeId })
+            ? runQuickCommandInNewTab({ command: { id: `canvas_${id}`, label: labelOverride ?? 'Canvas terminal', action: 'terminal-command', command, appendEnter: true }, worktreeId: canvasRuntimeWorktreeId })
             : null
           const tabId = result?.tabId ?? (() => {
             const tab = appState.createTab(canvasRuntimeWorktreeId, undefined, undefined, cwd ? { startupCwd: cwd } : undefined)
@@ -265,7 +265,7 @@ const CanvasPageInner: React.FC = () => {
       const command = draft.command.trim()
       const result = command
         ? runQuickCommandInNewTab({
-            command: { id: `canvas_${Date.now()}`, label: draft.name, command, appendEnter: true },
+            command: { id: `canvas_${Date.now()}`, label: draft.name, action: 'terminal-command', command, appendEnter: true },
             worktreeId: canvasRuntimeWorktreeId,
           })
         : null
