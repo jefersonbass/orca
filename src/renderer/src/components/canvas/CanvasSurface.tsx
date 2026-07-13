@@ -194,14 +194,17 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
 
   const [flowNodes, setFlowNodes] = useNodesState<Node>(initialNodes)
   const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges)
+  const flowNodesRef = useRef<Node[]>(initialNodes)
 
   useEffect(() => {
-    setFlowNodes(canvasDocumentNodes.map((docNode) => ({
+    const nextNodes = canvasDocumentNodes.map((docNode) => ({
       id: docNode.id, type: docNode.type, position: docNode.position,
       width: docNode.size.width, height: docNode.size.height,
       zIndex: docNode.type === 'group' ? docNode.zIndex - 1000 : docNode.zIndex,
       data: { ...docNode, ...docNode.metadata, childCount: canvasDocumentNodes.filter((node) => node.groupId === docNode.id).length } as any, selected: false
-    })))
+    }))
+    flowNodesRef.current = nextNodes
+    setFlowNodes(nextNodes)
   }, [canvasDocumentNodes, setFlowNodes])
 
   useEffect(() => {
@@ -215,43 +218,49 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   }, [canvasEdges, setFlowEdges])
 
   const onNodesChangeAny = useCallback((changes: any[]) => {
-    setFlowNodes((current) => {
-      let next = applyNodeChanges(changes, current)
-      const document = useAppStore.getState().canvasDocument
-      if (document && changes.some((change) => change.type === 'position' || change.type === 'dimensions')) {
-        const groupDeltas = new Map<string, { dx: number; dy: number }>()
-        for (const change of changes) {
-          if (change.type !== 'position') continue
-          const before = document.nodes.find((node) => node.id === change.id)
-          const after = next.find((node) => node.id === change.id)
-          if (!before || before.type !== 'group' || !after) continue
-          groupDeltas.set(change.id, { dx: after.position.x - before.position.x, dy: after.position.y - before.position.y })
-        }
-        if (groupDeltas.size > 0) {
-          next = next.map((flowNode) => {
-            const group = document.nodes.find((node) => node.id === flowNode.id)?.groupId
-            const delta = group ? groupDeltas.get(group) : undefined
-            return delta ? { ...flowNode, position: { x: flowNode.position.x + delta.dx, y: flowNode.position.y + delta.dy } } : flowNode
-          })
-        }
-        useAppStore.getState().setCanvasDocument({
-          ...document,
-          nodes: document.nodes.map((node) => {
-            const flowNode = next.find((candidate) => candidate.id === node.id)
-            if (!flowNode) return node
-            const measured = flowNode.measured
-            return {
-              ...node,
-              position: flowNode.position,
-              size: measured?.width && measured?.height
-                ? { width: measured.width, height: measured.height }
-                : node.size
-            }
-          })
+    let next = applyNodeChanges(changes, flowNodesRef.current)
+    const document = useAppStore.getState().canvasDocument
+    const hasGeometryChange = changes.some((change) => change.type === 'position' || change.type === 'dimensions')
+
+    if (document && hasGeometryChange) {
+      const groupDeltas = new Map<string, { dx: number; dy: number }>()
+      for (const change of changes) {
+        if (change.type !== 'position') continue
+        const before = document.nodes.find((node) => node.id === change.id)
+        const after = next.find((node) => node.id === change.id)
+        if (!before || before.type !== 'group' || !after) continue
+        groupDeltas.set(change.id, { dx: after.position.x - before.position.x, dy: after.position.y - before.position.y })
+      }
+      if (groupDeltas.size > 0) {
+        next = next.map((flowNode) => {
+          const group = document.nodes.find((node) => node.id === flowNode.id)?.groupId
+          const delta = group ? groupDeltas.get(group) : undefined
+          return delta ? { ...flowNode, position: { x: flowNode.position.x + delta.dx, y: flowNode.position.y + delta.dy } } : flowNode
         })
       }
-      return next
-    })
+    }
+
+    // Keep the updater pure: React may invoke it during render/commit.
+    flowNodesRef.current = next
+    setFlowNodes(next)
+
+    if (document && hasGeometryChange) {
+      useAppStore.getState().setCanvasDocument({
+        ...document,
+        nodes: document.nodes.map((node) => {
+          const flowNode = next.find((candidate) => candidate.id === node.id)
+          if (!flowNode) return node
+          const measured = flowNode.measured
+          return {
+            ...node,
+            position: flowNode.position,
+            size: measured?.width && measured?.height
+              ? { width: measured.width, height: measured.height }
+              : node.size
+          }
+        })
+      })
+    }
   }, [setFlowNodes])
 
   const onEdgesChangeAny = onEdgesChange as any
