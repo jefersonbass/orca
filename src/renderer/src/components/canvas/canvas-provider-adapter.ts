@@ -292,7 +292,7 @@ export function formatAgentInstruction(
       return [`- ${target?.label ?? binding.targetAgentNodeId} (${binding.targetAgentNodeId})${handle ? ` handle=${handle}` : ''} via ${binding.kind}`]
     })
   const routeContext = routes.length > 0
-    ? `\n\nNative Orca routes available from this agent:\n${routes.join('\n')}\nThe route is already a native terminal handle. Send work with: orca orchestration send --to HANDLE --subject Canvas-task --body task-details. Do not search AppData or create environment variables.`
+    ? `\n\nNative Orca routes available from this agent:\n${routes.join('\n')}\nThe route is already a native terminal handle. On Windows use: orca.cmd orchestration send --to HANDLE --subject Canvas-task --body task-details. For a plain terminal use: orca.cmd terminal send --terminal HANDLE --text task-details --enter. On POSIX use the equivalent orca command. Do not search AppData or create environment variables.`
     : ''
   const incomingContext = state.canvasOrchestration.bindings
     .filter((binding) => binding.enabled)

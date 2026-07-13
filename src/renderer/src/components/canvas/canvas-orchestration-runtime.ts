@@ -180,6 +180,7 @@ function contextMessageForBinding(binding: ContextBinding): AgentCanvasMessage |
 }
 
 const contextUpdateQueues = new Map<string, Promise<void>>()
+const autoContextDeliveryInFlight = new Set<string>()
 
 async function deliverCanvasContextUpdate(
   binding: ContextBinding,
@@ -225,8 +226,9 @@ async function deliverCanvasContextUpdate(
   }
   persistWorkflowMessage(transitionCanvasMessage(delivered, 'acknowledged', 'system'))
   try {
+    await dispatchCanvasDelegations(binding.targetAgentNodeId, message.content)
     const response = await waitForAgentResponse({ target, baselineMessageIds: baseline, timeoutMs: 30_000 })
-    dispatchCanvasDelegations(binding.targetAgentNodeId, response.content)
+    await dispatchCanvasDelegations(binding.targetAgentNodeId, response.content)
   } catch {
     // Context delivery remains acknowledged even when the provider is busy or
     // does not emit a parseable assistant response for this update.
@@ -250,12 +252,57 @@ export function publishCanvasContextUpdate(binding: ContextBinding, content: str
   })
 }
 
-/** Deliver provider-neutral delegation envelopes through the user-created
- * agent binding. The binding is the approval boundary; the agent does not need
- * to discover an API, inspect AppData, or ask the user to paste a second prompt. */
-export function dispatchCanvasDelegations(_sourceAgentNodeId: string, _response: string): void {
-  // Native Orca agents delegate through orchestration.send/check. Canvas no
-  // longer parses assistant text or injects a private markup protocol.
+/** Forward a dispatch through the user-created Canvas delegation graph using
+ * native Orca handles. This is deliberately graph-driven: it does not parse
+ * assistant text or inject a private markup protocol, and the visited set
+ * makes A -> B -> A safe. */
+export async function dispatchCanvasDelegations(
+  sourceAgentNodeId: string,
+  content: string,
+  visited = new Set<string>()
+): Promise<void> {
+  if (visited.has(sourceAgentNodeId)) return
+  visited.add(sourceAgentNodeId)
+  const state = useAppStore.getState()
+  const bindings = state.canvasOrchestration.bindings.filter((binding): binding is DelegationBinding =>
+    binding.kind === 'delegation' && binding.enabled && binding.sourceAgentNodeId === sourceAgentNodeId
+  )
+  for (const binding of bindings) {
+    const targetRef = referenceForAgentNode(binding.targetAgentNodeId)
+    const target = targetRef
+      ? resolveCanvasAgent(targetRef, state.agentStatusByPaneKey)
+      : { ok: false as const, error: 'Delegation target has no live resource reference' }
+    const message = prepareDelegationDelivery(
+      binding,
+      `[Native Canvas delegation]\nThe Canvas graph routed this dispatch from ${sourceAgentNodeId}. Execute the linked work if it is actionable.\n\n${content}`
+    )
+    const queued = transitionCanvasMessage(message, 'queued', 'system')
+    persistWorkflowMessage(queued)
+    if (!target.ok) {
+      persistWorkflowMessage({
+        ...transitionCanvasMessage(queued, 'failed', 'system'),
+        deliveryError: target.error
+      })
+      continue
+    }
+    const delivering = transitionCanvasMessage(queued, 'delivering', 'system')
+    persistWorkflowMessage(delivering)
+    const delivery = await sendInstruction(target, message)
+    if (delivery.success) {
+      const delivered = {
+        ...transitionCanvasMessage(delivering, 'delivered', 'system'),
+        providerReceipt: delivery.providerReceipt,
+        deliveredAt: delivery.timestamp
+      }
+      persistWorkflowMessage(transitionCanvasMessage(delivered, 'acknowledged', 'system'))
+      await dispatchCanvasDelegations(binding.targetAgentNodeId, content, visited)
+    } else {
+      persistWorkflowMessage({
+        ...transitionCanvasMessage(delivering, 'failed', 'system'),
+        deliveryError: delivery.error
+      })
+    }
+  }
 }
 
 /**
@@ -266,6 +313,7 @@ export function dispatchCanvasDelegations(_sourceAgentNodeId: string, _response:
  * session.
  */
 export function autoDeliverContextBinding(binding: ContextBinding, attempt = 0): void {
+  if (autoContextDeliveryInFlight.has(binding.id)) return
   const existing = contextMessageForBinding(binding)
   if (existing && ['queued', 'delivering', 'delivered', 'acknowledged'].includes(existing.deliveryState)) {
     return
@@ -274,6 +322,7 @@ export function autoDeliverContextBinding(binding: ContextBinding, attempt = 0):
     ? existing
     : prepareContextDelivery(binding)
 
+  autoContextDeliveryInFlight.add(binding.id)
   void deliverApprovedCanvasMessage(message.id).then(() => {
     const latest = contextMessageForBinding(binding)
     if (attempt >= 8 || latest?.deliveryState !== 'failed') return
@@ -282,6 +331,8 @@ export function autoDeliverContextBinding(binding: ContextBinding, attempt = 0):
     if (attempt < 8) {
       window.setTimeout(() => autoDeliverContextBinding(binding, attempt + 1), 1_500)
     }
+  }).finally(() => {
+    autoContextDeliveryInFlight.delete(binding.id)
   })
 }
 
@@ -315,7 +366,8 @@ export async function deliverApprovedCanvasMessage(messageIdToDeliver: string): 
   persistWorkflowMessage(delivering)
   try {
     const baseline = await readAgentMessageIds(target)
-    const delivery = await sendInstruction(target, await hydrateCanvasMessageForDispatch(message))
+    const hydratedMessage = await hydrateCanvasMessageForDispatch(message)
+    const delivery = await sendInstruction(target, hydratedMessage)
     if (!delivery.success) {
       persistWorkflowMessage({ ...transitionCanvasMessage(delivering, 'failed', 'system'), deliveryError: delivery.error })
       failTaskForDelivery(message, delivery.error ?? 'Provider delivery failed')
@@ -323,8 +375,9 @@ export async function deliverApprovedCanvasMessage(messageIdToDeliver: string): 
     }
     const delivered = { ...transitionCanvasMessage(delivering, 'delivered', 'system'), providerReceipt: delivery.providerReceipt, deliveredAt: delivery.timestamp }
     persistWorkflowMessage(delivered)
+    await dispatchCanvasDelegations(message.toAgentId, hydratedMessage.content)
     const response = await waitForAgentResponse({ target, baselineMessageIds: baseline })
-    dispatchCanvasDelegations(message.toAgentId, response.content)
+    await dispatchCanvasDelegations(message.toAgentId, response.content)
     const handledByWorkflow = advanceSpecificationWorkflow(message, response)
     const output = useAppStore.getState().canvasOrchestration.bindings.find((binding): binding is OutputBinding =>
       binding.kind === 'output' && binding.sourceAgentNodeId === message.toAgentId && binding.enabled
