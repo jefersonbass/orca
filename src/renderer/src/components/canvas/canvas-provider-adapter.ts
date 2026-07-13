@@ -91,9 +91,17 @@ export async function sendInstruction(
   const timestamp = new Date().toISOString()
   try {
     const content = formatAgentInstruction(message)
-    const nativeDelivery = await sendThroughOrcaOrchestration(target, message, content, timestamp)
-    if (nativeDelivery) {
-      return nativeDelivery
+    // OpenCode/Verboo does not expose the same native transcript + idle hook
+    // lifecycle as Claude/Codex. Its Canvas identity is intentionally backed
+    // by terminal scraping, so routing it through the native push-on-idle
+    // mailbox can leave a valid message queued forever. Keep the native Orca
+    // mailbox for transcript-backed agents and submit OpenCode directly to
+    // its PTY instead.
+    if (target.captureMode !== 'terminal-scrape') {
+      const nativeDelivery = await sendThroughOrcaOrchestration(target, message, content, timestamp)
+      if (nativeDelivery) {
+        return nativeDelivery
+      }
     }
     const leafId = target.paneKey.startsWith(`${target.tabId}:`)
       ? target.paneKey.slice(target.tabId.length + 1)
