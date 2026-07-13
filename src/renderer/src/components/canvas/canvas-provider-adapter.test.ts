@@ -40,4 +40,30 @@ describe('resolveCanvasAgent', () => {
       captureMode: 'terminal-scrape'
     })
   })
+
+  it('keeps custom CLI agents on the PTY delivery path', () => {
+    const resolved = resolveCanvasAgent({
+      agentSessionId: 'verboo-session',
+      paneKey: 'tab-2:leaf-2',
+      terminalTabId: 'tab-2',
+      provider: 'verboo'
+    }, {
+      'tab-2:leaf-2': {
+        state: 'done',
+        prompt: '',
+        updatedAt: Date.now(),
+        stateStartedAt: Date.now(),
+        paneKey: 'tab-2:leaf-2',
+        tabId: 'tab-2',
+        agentType: 'verboo',
+        stateHistory: []
+      }
+    })
+
+    expect(resolved).toMatchObject({
+      ok: true,
+      provider: 'verboo',
+      captureMode: 'terminal-scrape'
+    })
+  })
 })

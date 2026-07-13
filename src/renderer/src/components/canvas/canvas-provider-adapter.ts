@@ -38,6 +38,20 @@ type CanvasRoutingTerminal = Pick<
   'handle' | 'tabId' | 'leafId' | 'worktreeId' | 'worktreePath' | 'title' | 'connected' | 'writable'
 >
 
+/**
+ * Only providers with an Orca-native transcript/hook integration can consume
+ * orchestration.mail directly. Custom CLIs (including Verboo) are visible in
+ * a terminal but do not poll that mailbox, so they must receive the prompt
+ * through their live PTY.
+ */
+const NATIVE_TRANSCRIPT_PROVIDERS = new Set(['claude', 'codex', 'gemini'])
+
+function defaultCaptureMode(provider: string): 'native-transcript' | 'terminal-scrape' {
+  return NATIVE_TRANSCRIPT_PROVIDERS.has(provider.toLowerCase())
+    ? 'native-transcript'
+    : 'terminal-scrape'
+}
+
 /** Resolve only identities backed by a live Orca agent-status entry. */
 export function resolveCanvasAgent(
   ref: CanvasAgentReference,
@@ -81,7 +95,7 @@ export function resolveCanvasAgent(
     ...(entry.providerSession?.transcriptPath
       ? { transcriptPath: entry.providerSession.transcriptPath }
       : {}),
-    captureMode: ref.captureMode ?? (provider === 'opencode' ? 'terminal-scrape' : 'native-transcript')
+    captureMode: ref.captureMode ?? defaultCaptureMode(provider)
   }
 }
 
@@ -101,7 +115,7 @@ export async function sendInstruction(
       return { success: false, messageId: message.id, timestamp, error: 'Canvas target terminal handle is stale' }
     }
     const content = formatAgentInstruction(message, terminalInventory, terminal.handle)
-    const method = target.captureMode === 'terminal-scrape' ? 'terminal.send' : 'orchestration.send'
+    const method = target.captureMode === 'native-transcript' ? 'orchestration.send' : 'terminal.send'
     const params = method === 'terminal.send'
       ? {
           terminal: terminal.handle,
@@ -123,6 +137,17 @@ export async function sendInstruction(
     if (!sent.ok) {
       const error = typeof sent.error === 'string' ? sent.error : sent.error?.message
       return { success: false, messageId: message.id, timestamp, error: error ?? `Native ${method} failed` }
+    }
+    if (method === 'terminal.send') {
+      const sendResult = sent.result as { send?: { accepted?: boolean; refusedReason?: string } } | undefined
+      if (sendResult?.send?.accepted === false) {
+        return {
+          success: false,
+          messageId: message.id,
+          timestamp,
+          error: sendResult.send.refusedReason ?? 'Canvas target terminal rejected the prompt'
+        }
+      }
     }
     return { success: true, messageId: message.id, timestamp, providerReceipt: `${method}:${terminal.handle}` }
   } catch (error) {
