@@ -2,15 +2,8 @@ import type { AgentCanvasMessage, CanvasAgentReference } from '../../../../share
 import type { AgentStatusEntry, AgentType } from '../../../../shared/agent-status-types'
 import type { NativeChatMessage } from '../../../../shared/native-chat-types'
 import type { RuntimeTerminalSummary } from '../../../../shared/runtime-types'
-import {
-  getSettingsForAgentTabRuntimeOwner,
-  pasteDraftToAgentPtyWhenReady,
-  submitPromptToAgentTab
-} from '@/lib/agent-paste-draft'
 import { scrapeNativeChatSession } from '@/components/native-chat/native-chat-scrape-fallback'
 import { useAppStore } from '@/store'
-import { sendRuntimePtyInputVerified } from '@/runtime/runtime-terminal-inspection'
-import { buildCanvasAgentContext } from './canvas-agent-context'
 
 export type DeliveryResult = {
   success: boolean
@@ -56,7 +49,10 @@ export function resolveCanvasAgent(
     : undefined)
   if (!entry) {
     const directTabId = ref.terminalTabId ?? ref.paneKey?.split(':')[0]
-    if (ref.paneKey && directTabId && ref.agentSessionId && ref.provider && ref.provider !== 'unknown') {
+    if (
+      ref.paneKey && directTabId && ref.agentSessionId && ref.provider &&
+      (ref.provider !== 'unknown' || ref.agentSessionId.startsWith('canvas-tab:'))
+    ) {
       return {
         ok: true,
         sessionId: ref.agentSessionId,
@@ -97,148 +93,43 @@ export async function sendInstruction(
   const timestamp = new Date().toISOString()
   try {
     const terminalInventory = await loadCanvasRoutingTerminals()
-    const content = formatAgentInstruction(
-      message,
-      terminalInventory ? formatCanvasRoutingInventory(terminalInventory) : ''
-    )
-    // OpenCode/Verboo does not expose the same native transcript + idle hook
-    // lifecycle as Claude/Codex. Its Canvas identity is intentionally backed
-    // by terminal scraping, so routing it through the native push-on-idle
-    // mailbox can leave a valid message queued forever. Keep the native Orca
-    // mailbox for transcript-backed agents and submit OpenCode directly to
-    // its PTY instead.
-    if (target.captureMode !== 'terminal-scrape') {
-      const nativeDelivery = await sendThroughOrcaOrchestration(
-        target,
-        message,
-        content,
-        timestamp,
-        terminalInventory
-      )
-      if (nativeDelivery) {
-        return nativeDelivery
-      }
+    if (!terminalInventory) {
+      return { success: false, messageId: message.id, timestamp, error: 'Orca runtime is unavailable' }
     }
-    const leafId = target.paneKey.startsWith(`${target.tabId}:`)
-      ? target.paneKey.slice(target.tabId.length + 1)
-      : null
-    const ptyId = leafId
-      ? useAppStore.getState().terminalLayoutsByTabId[target.tabId]?.ptyIdsByLeafId?.[leafId]
-      : null
-    const submitted = ptyId
-      ? await pasteDraftToAgentPtyWhenReady({
-          tabId: target.tabId,
-          ptyId,
-          content,
-          agent: target.provider === 'codex' ? 'codex' : undefined,
-          submit: true,
-          timeoutMs: 15_000
-        })
-      : await submitPromptToAgentTab({ tabId: target.tabId, content })
-    if (!submitted) {
-      return { success: false, messageId: message.id, timestamp, error: 'Agent PTY did not accept the prompt' }
+    const terminal = findCanvasTerminal(target, terminalInventory)
+    if (!terminal) {
+      return { success: false, messageId: message.id, timestamp, error: 'Canvas target terminal handle is stale' }
     }
-    // Codex can consume the first Enter as the commit of a long bracketed-paste
-    // placeholder in a background pane. A delayed confirmation submits that
-    // committed composer value. An extra Enter after an already-submitted turn
-    // is harmless, while omitting it strands orchestration prompts indefinitely.
-    if (ptyId) {
-      const confirmationDelayMs = content.length > 4_000 ? 2_000 : 500
-      await new Promise<void>((resolve) => window.setTimeout(resolve, confirmationDelayMs))
-      const confirmed = await sendRuntimePtyInputVerified(
-        getSettingsForAgentTabRuntimeOwner(target.tabId),
-        ptyId,
-        '\r'
-      )
-      if (!confirmed) {
-        return { success: false, messageId: message.id, timestamp, error: 'Agent PTY did not confirm prompt submission' }
-      }
+    const content = formatAgentInstruction(message, terminalInventory, terminal.handle)
+    const method = target.captureMode === 'terminal-scrape' ? 'terminal.send' : 'orchestration.send'
+    const params = method === 'terminal.send'
+      ? {
+          terminal: terminal.handle,
+          text: content,
+          enter: true,
+          client: { id: 'canvas-orchestration', type: 'desktop' as const }
+        }
+      : {
+          to: terminal.handle,
+          from: `canvas:${message.fromAgentId ?? 'user'}`,
+          subject: message.type === 'delegation' ? 'Canvas delegation' : 'Canvas resource dispatch',
+          body: content,
+          type: message.type === 'delegation' ? 'dispatch' as const : 'status' as const,
+          priority: 'high' as const,
+          threadId: `canvas:${message.id}`,
+          payload: JSON.stringify({ canvasMessageId: message.id, contextRefs: message.contextRefs })
+        }
+    const sent = await window.api.runtime.call({ method, params })
+    if (!sent.ok) {
+      const error = typeof sent.error === 'string' ? sent.error : sent.error?.message
+      return { success: false, messageId: message.id, timestamp, error: error ?? `Native ${method} failed` }
     }
-    return {
-      success: true,
-      messageId: message.id,
-      timestamp,
-      providerReceipt: `pty-submitted:${target.paneKey}`
-    }
+    return { success: true, messageId: message.id, timestamp, providerReceipt: `${method}:${terminal.handle}` }
   } catch (error) {
     return { success: false, messageId: message.id, timestamp, error: String(error) }
   }
 }
 
-/**
- * Use the same main-process mailbox that native Orca agents use. The Canvas
- * must not create a second communication universe: terminal handles, queued
- * delivery and push-on-idle behavior are already owned by the runtime.
- *
- * A null result means this runtime does not expose the RPC (for example the
- * browser fallback or an older packaged build); callers retain the existing
- * renderer PTY path in that case.
- */
-async function sendThroughOrcaOrchestration(
-  target: ResolvedCanvasAgent,
-  message: AgentCanvasMessage,
-  content: string,
-  timestamp: string,
-  knownTerminals: CanvasRoutingTerminal[] | null
-): Promise<DeliveryResult | null> {
-  if (typeof window.api?.runtime?.call !== 'function') {
-    return null
-  }
-  try {
-    const terminals = knownTerminals ?? await loadCanvasRoutingTerminals()
-    if (!terminals) return null
-    const targetLeafId = target.paneKey.startsWith(`${target.tabId}:`)
-      ? target.paneKey.slice(target.tabId.length + 1)
-      : undefined
-    const terminal = terminals.find((candidate) =>
-      candidate.tabId === target.tabId &&
-      (targetLeafId === undefined || candidate.leafId === targetLeafId)
-    )
-    if (!terminal) {
-      return null
-    }
-
-    const sent = await window.api.runtime.call({
-      method: 'orchestration.send',
-      params: {
-        to: terminal.handle,
-        from: `canvas:${message.fromAgentId ?? 'user'}`,
-        subject: message.type === 'delegation' ? 'Canvas delegation' : 'Canvas context',
-        body: content,
-        type: message.type === 'delegation' ? 'dispatch' : 'status',
-        priority: 'high',
-        threadId: `canvas:${message.id}`,
-        payload: JSON.stringify({
-          canvasMessageId: message.id,
-          canvasNodeId: message.toAgentId,
-          contextRefs: message.contextRefs
-        })
-      }
-    })
-    if (!sent.ok) {
-      // A runtime may be reachable while its orchestration schema is older
-      // than the renderer. Fall back to the verified PTY path instead of
-      // losing the user instruction.
-      return null
-    }
-
-    return {
-      success: true,
-      messageId: message.id,
-      timestamp,
-      providerReceipt: `orca-orchestration:${terminal.handle}`
-    }
-  } catch {
-    // Older packaged builds and disconnected remote runtimes can reject the
-    // RPC. The renderer delivery path remains a safe compatibility fallback.
-    return null
-  }
-}
-
-/** Read the same live terminal inventory exposed to Orca's CLI. This is the
- * cross-worktree bridge: a Canvas agent can address a running terminal or
- * agent by its native handle without creating a duplicate Canvas node or
- * searching AppData/workspace files. */
 async function loadCanvasRoutingTerminals(): Promise<CanvasRoutingTerminal[] | null> {
   if (typeof window.api?.runtime?.call !== 'function') return null
   try {
@@ -254,27 +145,14 @@ async function loadCanvasRoutingTerminals(): Promise<CanvasRoutingTerminal[] | n
   }
 }
 
-function formatCanvasRoutingInventory(terminals: CanvasRoutingTerminal[]): string {
-  const state = useAppStore.getState()
-  const statuses = Object.values(state.agentStatusByPaneKey)
-  const live = terminals.filter((terminal) => terminal.connected).slice(0, 80)
-  const lines = live.map((terminal) => {
-    const paneKey = `${terminal.tabId}:${terminal.leafId}`
-    const status = statuses.find((candidate) =>
-      candidate.paneKey === paneKey ||
-      (candidate.tabId === terminal.tabId && candidate.worktreeId === terminal.worktreeId)
-    )
-    const role = status
-      ? `${status.agentType ?? 'agent'} / ${status.state}`
-      : 'terminal'
-    const title = terminal.title?.trim() || 'untitled'
-    const path = terminal.worktreePath || terminal.worktreeId
-    return `- handle=${terminal.handle} | role=${role} | title=${title} | worktree=${terminal.worktreeId} | path=${path} | pane=${paneKey} | writable=${terminal.writable}`
-  })
-  if (lines.length === 0) {
-    return '\n\nLive Orca routing inventory: no connected terminals were returned.'
-  }
-  return `\n\nLive Orca routing inventory (all visible worktrees; use these native handles):\n${lines.join('\n')}\n\nWhen the user asks you to send work to another live Agent, use the native Orca mailbox with the matching handle, for example:\norca orchestration send --to HANDLE --subject "Canvas task" --body "task details"\nWhen the target is a plain terminal, use:\norca terminal send --terminal HANDLE --text "command or task" --enter\nYou may also use @worktree:WORKTREE_ID, @idle, or @all when the request is a group operation. Do not search AppData or the workspace filesystem for another Agent's communication channel.`
+function findCanvasTerminal(target: ResolvedCanvasAgent, terminals: CanvasRoutingTerminal[]): CanvasRoutingTerminal | null {
+  const targetLeafId = target.paneKey.startsWith(`${target.tabId}:`)
+    ? target.paneKey.slice(target.tabId.length + 1)
+    : undefined
+  return terminals.find((candidate) =>
+    candidate.connected && candidate.tabId === target.tabId &&
+    (targetLeafId === undefined || candidate.leafId === targetLeafId)
+  ) ?? terminals.find((candidate) => candidate.connected && candidate.handle === target.paneKey) ?? null
 }
 
 /**
@@ -377,7 +255,11 @@ export function nativeChatMessageText(message: NativeChatMessage): string {
     .trim()
 }
 
-export function formatAgentInstruction(message: AgentCanvasMessage, routingInventory = ''): string {
+export function formatAgentInstruction(
+  message: AgentCanvasMessage,
+  terminals: CanvasRoutingTerminal[] = [],
+  targetHandle?: string
+): string {
   const heading = message.type === 'delegation'
     ? 'DELEGATION'
     : message.type === 'review-request'
@@ -389,19 +271,28 @@ export function formatAgentInstruction(message: AgentCanvasMessage, routingInven
       ).join('\n')}`
     : ''
   const state = useAppStore.getState()
-  const canvasContext = state.canvasDocument
-    ? buildCanvasAgentContext(state.canvasDocument, state.canvasOrchestration.bindings, message.toAgentId)
-    : null
   const routes = state.canvasOrchestration.bindings
     .filter((binding) => binding.enabled)
     .flatMap((binding) => {
       if (binding.kind !== 'delegation' && binding.kind !== 'reporting') return []
       if (binding.sourceAgentNodeId !== message.toAgentId) return []
       const target = state.canvasDocument?.nodes.find((node) => node.id === binding.targetAgentNodeId)
-      return [`- ${target?.label ?? binding.targetAgentNodeId} (${binding.targetAgentNodeId}) via ${binding.kind}`]
+      const targetRef = target?.resourceRef
+      const targetTabId = targetRef?.kind === 'agent-terminal' || targetRef?.kind === 'live-terminal'
+        ? targetRef.paneKey.split(':')[0]
+        : targetRef?.kind === 'terminal-tab' || targetRef?.kind === 'agent-pane'
+          ? targetRef.tabId
+          : undefined
+      const targetLeafId = targetRef?.kind === 'agent-terminal' || targetRef?.kind === 'live-terminal'
+        ? targetRef.paneKey.split(':')[1]
+        : targetRef?.kind === 'agent-pane' ? targetRef.leafId : undefined
+      const handle = targetTabId
+        ? terminals.find((terminal) => terminal.tabId === targetTabId && (!targetLeafId || terminal.leafId === targetLeafId))?.handle
+        : undefined
+      return [`- ${target?.label ?? binding.targetAgentNodeId} (${binding.targetAgentNodeId})${handle ? ` handle=${handle}` : ''} via ${binding.kind}`]
     })
   const routeContext = routes.length > 0
-    ? `\n\nCanvas orchestration routes available from this agent:\n${routes.join('\n')}\nUse the linked route when this instruction asks you to delegate or report work; the target node id is included above. To delegate autonomously, emit exactly <orca-delegate target="TARGET_NODE_ID">task for the linked agent</orca-delegate>. The Canvas runtime will deliver that block through the existing binding.`
+    ? `\n\nNative Orca routes available from this agent:\n${routes.join('\n')}\nThe route is already a native terminal handle. Send work with: orca orchestration send --to HANDLE --subject Canvas-task --body task-details. Do not search AppData or create environment variables.`
     : ''
   const incomingContext = state.canvasOrchestration.bindings
     .filter((binding) => binding.enabled)
@@ -426,6 +317,8 @@ export function formatAgentInstruction(message: AgentCanvasMessage, routingInven
     ...incomingContext.map((entry) => `${entry.split(': ')[0]} -> ${message.toAgentId}`),
     ...linkedAgents.map((target) => `${message.toAgentId} -> ${target}`)
   ]
-  const canvasEnvelope = `\n\nOrca Canvas context (authoritative for this turn; do not infer it from the shell environment):\nORCA_NOTE=${JSON.stringify(incomingContext.join('\n'))}\nORCA_AGENTS=${JSON.stringify(linkedAgents.join(', '))}\nORCA_LINKS=${JSON.stringify(links.join('; '))}${canvasContext ? `\nORCA_CANVAS_NODE_ID=${canvasContext.nodeId}\nORCA_CANVAS_CONTEXT=${canvasContext.serialized}` : ''}${incomingContext.length > 0 ? `\n\nLinked Canvas content:\n${incomingContext.join('\n')}` : ''}`
-  return `[${heading} from ${message.fromAgentId ?? 'user'}]\n\n${message.content}${context}${routeContext}${canvasEnvelope}${routingInventory}`
+  const targetContext = targetHandle ? `\n\nNative target handle: ${targetHandle}` : ''
+  const linkedContext = incomingContext.length > 0 ? `\n\nLinked Canvas resources (authoritative for this dispatch):\n${incomingContext.join('\n')}` : ''
+  const linkContext = links.length > 0 ? `\n\nCanvas links in this dispatch:\n${links.join('\n')}` : ''
+  return `[${heading} from ${message.fromAgentId ?? 'user'}]\n\n${message.content}${context}${routeContext}${targetContext}${linkedContext}${linkContext}`
 }

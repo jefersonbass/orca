@@ -4,7 +4,6 @@ import type { CanvasAgentReference, DelegationBinding, OutputBinding, ReportingB
 import type { CanvasNodeDocument } from '../../../../shared/canvas-types'
 import { readAgentMessageIds, resolveCanvasAgent, sendInstruction, waitForAgentResponse } from './canvas-provider-adapter'
 import { transitionCanvasMessage } from '../../../../shared/canvas-state-machines'
-import { parseCanvasDelegationRequests } from './canvas-delegation-protocol'
 import {
   activateTaskForDelivery,
   advanceSpecificationWorkflow,
@@ -22,12 +21,20 @@ function metadataText(node: CanvasNodeDocument, key: string): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+function canvasNodeDescriptor(node: CanvasNodeDocument): string {
+  const metadata = Object.entries(node.metadata ?? {})
+    .filter(([key, value]) => key !== 'content' && key !== 'text' && typeof value !== 'object')
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(', ')
+  return `Canvas element: ${node.type} | label=${node.label} | position=${Math.round(node.position.x)},${Math.round(node.position.y)} | size=${Math.round(node.size.width)}x${Math.round(node.size.height)}${node.color ? ` | color=${node.color}` : ''}${metadata ? ` | ${metadata}` : ''}`
+}
+
 function nodeContent(nodeId: string): { content: string; resourceType: string } {
   const node = useAppStore.getState().canvasDocument?.nodes.find((item) => item.id === nodeId)
   if (!node) return { content: '', resourceType: 'unknown' }
   const ref = node.resourceRef
   const content = metadataText(node, 'content') || metadataText(node, 'text')
-  if (content) return { content, resourceType: node.type }
+  if (content) return { content: `${canvasNodeDescriptor(node)}\n\n${content}`, resourceType: node.type }
 
   switch (node.type) {
     case 'file':
@@ -40,12 +47,64 @@ function nodeContent(nodeId: string): { content: string; resourceType: string } 
     case 'task':
       return { content: `Task: ${node.label}${metadataText(node, 'taskId') ? `\nID: ${metadataText(node, 'taskId')}` : ''}`, resourceType: node.type }
     case 'browser-preview':
-      return { content: `Browser page: ${metadataText(node, 'url') || (ref?.kind === 'browser-preview' ? ref.url : node.label)}`, resourceType: node.type }
+      return { content: `Browser page: ${metadataText(node, 'url') || (ref?.kind === 'browser-preview' ? ref.url : node.label)}\nLive rendered content is requested by the native Canvas dispatcher.`, resourceType: node.type }
     case 'browser-session':
       return { content: `Browser session: ${node.label}${ref?.kind === 'browser-session' ? `\nSession: ${ref.sessionId}` : ''}`, resourceType: node.type }
+    case 'group': {
+      const children = useAppStore.getState().canvasDocument?.nodes
+        .filter((child) => child.groupId === node.id)
+        .map((child) => `- ${canvasNodeDescriptor(child)}`)
+        .join('\n')
+      return { content: `${canvasNodeDescriptor(node)}${children ? `\nChildren:\n${children}` : ''}`, resourceType: node.type }
+    }
     default:
-      return { content: node.label, resourceType: node.type }
+      return { content: canvasNodeDescriptor(node), resourceType: node.type }
   }
+}
+
+/** Read the resource at dispatch time. Browser nodes are intentionally not
+ * represented by a URL alone: the native browser RPC returns the current
+ * rendered accessibility snapshot, including the page state an agent sees. */
+export async function resolveCanvasNodeContent(nodeId: string): Promise<{ content: string; resourceType: string }> {
+  const state = useAppStore.getState()
+  const node = state.canvasDocument?.nodes.find((item) => item.id === nodeId)
+  if (!node) return { content: 'Missing Canvas node', resourceType: 'missing' }
+  const base = nodeContent(nodeId)
+  if (node.type !== 'browser-preview' && node.type !== 'browser-session') return base
+
+  const ref = node.resourceRef
+  const browserPages = Object.values(state.browserPagesByWorkspace ?? {}).flat()
+  const browserPage = browserPages.find((page) =>
+    (ref?.kind === 'browser-preview' && (page.id === ref.tabId || page.workspaceId === ref.tabId)) ||
+    (ref?.kind === 'browser-session' && page.workspaceId === ref.workspaceId)
+  )
+  const pageId = browserPage?.id ?? (ref?.kind === 'browser-preview' ? ref.tabId : undefined)
+  const worktreeId = browserPage?.worktreeId ?? (ref?.kind === 'browser-preview' ? ref.worktreeId : undefined)
+  if (!pageId && !worktreeId) return base
+  try {
+    const worktreeSelector = worktreeId && (worktreeId.startsWith('id:') || worktreeId.startsWith('path:') || worktreeId.startsWith('branch:'))
+      ? worktreeId
+      : worktreeId
+        ? `id:${worktreeId}`
+        : undefined
+    const result = await window.api.runtime.call({
+      method: 'browser.snapshot',
+      params: { ...(worktreeSelector ? { worktree: worktreeSelector } : {}), ...(pageId ? { page: pageId } : {}) }
+    })
+    if (result.ok) {
+      const snapshot = result.result as { snapshot?: string; url?: string; title?: string }
+      const rendered = typeof snapshot.snapshot === 'string' ? snapshot.snapshot.slice(0, 50_000) : ''
+      if (rendered) {
+        return {
+          resourceType: node.type,
+          content: `Browser rendered snapshot (live native RPC)\nURL: ${snapshot.url ?? browserPage?.url ?? ''}\nTitle: ${snapshot.title ?? browserPage?.title ?? node.label}\n\n${rendered}`
+        }
+      }
+    }
+  } catch {
+    // A closed page should not prevent other Canvas resources from dispatching.
+  }
+  return base
 }
 
 function referenceForAgentNode(nodeId: string): CanvasAgentReference | null {
@@ -72,12 +131,8 @@ function referenceForAgentNode(nodeId: string): CanvasAgentReference | null {
   // tab. The live agent-status index is the authoritative source for the
   // pane/session/provider that appears after the CLI starts, so preserve the
   // tab identity here instead of treating the node as an unbound terminal.
-  if (
-    ref?.kind === 'terminal-tab' &&
-    (node?.type === 'agent-terminal' ||
-      (node?.type === 'live-terminal' && typeof node.metadata?.agent === 'string'))
-  ) {
-    const provider = typeof node.metadata?.agent === 'string' ? node.metadata.agent : 'unknown'
+  if (ref?.kind === 'terminal-tab') {
+    const provider = typeof node?.metadata?.agent === 'string' ? node.metadata.agent : 'unknown'
     return {
       // A live terminal can be addressed before its provider publishes a
       // native session record. OpenCode is supported through terminal scrape
@@ -132,10 +187,11 @@ async function deliverCanvasContextUpdate(
   attempt = 0
 ): Promise<void> {
   const store = useAppStore.getState()
+  const liveSource = await resolveCanvasNodeContent(binding.sourceNodeId)
   const message = prepareContextDelivery(
     binding,
     undefined,
-    `[Canvas context update]\nThe linked ${binding.sourceNodeId} item changed. Treat this as the latest authoritative content and act on it if it contains an instruction.\n\n${content}`
+    `[Canvas resource update]\nThe linked ${binding.sourceNodeId} item changed. Treat this as the latest authoritative content and act on it if it contains an instruction.\n\n${liveSource.content || content}`
   )
   const queued = transitionCanvasMessage(message, 'queued', 'system')
   persistWorkflowMessage(queued)
@@ -153,7 +209,7 @@ async function deliverCanvasContextUpdate(
   const baseline = await readAgentMessageIds(target).catch(() => new Set<string>())
   const delivering = transitionCanvasMessage(queued, 'delivering', 'system')
   persistWorkflowMessage(delivering)
-  const delivery = await sendInstruction(target, message)
+  const delivery = await sendInstruction(target, await hydrateCanvasMessageForDispatch(message))
   if (!delivery.success) {
     const failed = { ...transitionCanvasMessage(delivering, 'failed', 'system'), deliveryError: delivery.error }
     persistWorkflowMessage(failed)
@@ -197,19 +253,9 @@ export function publishCanvasContextUpdate(binding: ContextBinding, content: str
 /** Deliver provider-neutral delegation envelopes through the user-created
  * agent binding. The binding is the approval boundary; the agent does not need
  * to discover an API, inspect AppData, or ask the user to paste a second prompt. */
-export function dispatchCanvasDelegations(sourceAgentNodeId: string, response: string): void {
-  const state = useAppStore.getState()
-  for (const request of parseCanvasDelegationRequests(response)) {
-    const binding = state.canvasOrchestration.bindings.find((candidate): candidate is DelegationBinding =>
-      candidate.kind === 'delegation' &&
-      candidate.enabled &&
-      candidate.sourceAgentNodeId === sourceAgentNodeId &&
-      candidate.targetAgentNodeId === request.targetAgentNodeId
-    )
-    if (!binding) continue
-    const message = prepareDelegationDelivery(binding, request.content)
-    void deliverApprovedCanvasMessage(message.id)
-  }
+export function dispatchCanvasDelegations(_sourceAgentNodeId: string, _response: string): void {
+  // Native Orca agents delegate through orchestration.send/check. Canvas no
+  // longer parses assistant text or injects a private markup protocol.
 }
 
 /**
@@ -269,7 +315,7 @@ export async function deliverApprovedCanvasMessage(messageIdToDeliver: string): 
   persistWorkflowMessage(delivering)
   try {
     const baseline = await readAgentMessageIds(target)
-    const delivery = await sendInstruction(target, message)
+    const delivery = await sendInstruction(target, await hydrateCanvasMessageForDispatch(message))
     if (!delivery.success) {
       persistWorkflowMessage({ ...transitionCanvasMessage(delivering, 'failed', 'system'), deliveryError: delivery.error })
       failTaskForDelivery(message, delivery.error ?? 'Provider delivery failed')
@@ -302,6 +348,17 @@ export async function deliverApprovedCanvasMessage(messageIdToDeliver: string): 
     persistWorkflowMessage({ ...transitionCanvasMessage(delivering, 'failed', 'system'), deliveryError: String(error) })
     failTaskForDelivery(message, String(error))
   }
+}
+
+async function hydrateCanvasMessageForDispatch(message: AgentCanvasMessage): Promise<AgentCanvasMessage> {
+  if (message.contextRefs.length === 0) return message
+  const snapshots = await Promise.all(message.contextRefs.map(async (ref) => {
+    const resolved = await resolveCanvasNodeContent(ref.nodeId)
+    return `## Canvas resource: ${resolved.resourceType} (${ref.nodeId})\n${resolved.content}`
+  }))
+  const marker = '\n\n--- Native Canvas resource snapshots ---\n'
+  const contentWithoutPreviousSnapshot = message.content.split(marker)[0]
+  return { ...message, content: `${contentWithoutPreviousSnapshot}${marker}${snapshots.join('\n\n')}` }
 }
 
 export function approveCanvasOutput(messageIdToAppend: string): void {

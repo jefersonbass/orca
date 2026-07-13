@@ -13,7 +13,7 @@ function category(type: CanvasNodeType): OperationalCategory {
     type === 'file' || type === 'folder' || type === 'task' || type === 'diff' ||
     type === 'pull-request' || type === 'browser-preview' || type === 'browser-session' ||
     type === 'label' || type === 'rectangle' || type === 'highlight' || type === 'drawing' ||
-    type === 'terminal-summary' || type === 'missing-resource'
+    type === 'terminal-summary' || type === 'missing-resource' || type === 'group' || type === 'arrow'
   ) return 'context-resource'
   return 'unsupported'
 }

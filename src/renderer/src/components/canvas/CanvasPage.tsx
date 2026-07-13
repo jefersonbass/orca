@@ -17,7 +17,6 @@ import { CANVAS_DRAW_TO_ADD_NODE, type CanvasTool } from './canvas-tool-types'
 import { exportCanvasPng, exportCanvasSvg } from './canvas-export'
 import { allowedBindingKinds, createOperationalBinding } from './canvas-operational-graph'
 import { autoDeliverContextBinding, publishCanvasContextUpdate } from './canvas-orchestration-runtime'
-import { canvasNodeContextText } from './canvas-agent-context'
 
 const LEGACY_STORAGE_KEY = 'orca-canvas-document'
 
@@ -44,6 +43,7 @@ const CanvasPageInner: React.FC = () => {
   const activeRepoId = useAppStore((s) => s.activeRepoId)
   const agentStatusByPaneKey = useAppStore((s) => s.agentStatusByPaneKey)
   const canvasOrchestration = useAppStore((s) => s.canvasOrchestration)
+  const browserPagesByWorkspace = useAppStore((s) => s.browserPagesByWorkspace)
   const addCanvasBinding = useAppStore((s) => s.addCanvasBinding)
   const removeCanvasBinding = useAppStore((s) => s.removeCanvasBinding)
   const reactFlowRef = useRef<any>(null)
@@ -102,18 +102,20 @@ const CanvasPageInner: React.FC = () => {
     for (const binding of canvasOrchestration.bindings) {
       if (binding.kind !== 'context' || !binding.enabled) continue
       const source = storeCanvasDocument.nodes.find((node) => node.id === binding.sourceNodeId)
-      const content = source ? canvasNodeContextText(source) : 'missing canvas node'
-      const signature = `${binding.sourceNodeId}\0${content}`
+      const browserState = source?.type === 'browser-preview' || source?.type === 'browser-session'
+        ? JSON.stringify(browserPagesByWorkspace)
+        : ''
+      const signature = `${binding.sourceNodeId}\0${source ? JSON.stringify(source) : 'missing canvas node'}\0${browserState}`
       const prior = previous.get(binding.id)
       if (!prior) {
         autoDeliverContextBinding(binding)
       } else if (prior !== signature) {
-        publishCanvasContextUpdate(binding, content)
+        publishCanvasContextUpdate(binding, 'The linked Canvas resource changed; refresh its native snapshot at dispatch time.')
       }
       next.set(binding.id, signature)
     }
     contextSignaturesRef.current = next
-  }, [canvasOrchestration.bindings, storeCanvasDocument])
+  }, [browserPagesByWorkspace, canvasOrchestration.bindings, storeCanvasDocument])
 
   const syncDoc = useCallback(
     (updater: (doc: NonNullable<typeof storeCanvasDocument>) => typeof storeCanvasDocument) => {
