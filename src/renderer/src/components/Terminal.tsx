@@ -247,16 +247,6 @@ function Terminal(): React.JSX.Element | null {
   const terminalWorktreeParkingTimersRef = useRef(new Map<string, number>())
   const allWorktrees = useAllWorktrees()
   const folderWorkspaces = useAppStore((s) => s.folderWorkspaces)
-  const workspaceSurfaces = useMemo(
-    () => [
-      ...allWorktrees.map((worktree) => ({ id: worktree.id, path: worktree.path })),
-      ...folderWorkspaces.map((workspace) => ({
-        id: folderWorkspaceKey(workspace.id),
-        path: workspace.folderPath
-      }))
-    ],
-    [allWorktrees, folderWorkspaces]
-  )
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   const renderedActiveWorktreeId = activeWorktreeId
   const activeView = useAppStore((s) => s.activeView)
@@ -324,6 +314,25 @@ function Terminal(): React.JSX.Element | null {
   const canvasTerminalPortals: CanvasPortalTarget[] = useCanvasTerminalPortals(
     activeView === 'canvas'
   )
+  const workspaceSurfaces = useMemo(() => {
+    const surfaces = [
+      ...allWorktrees.map((worktree) => ({ id: worktree.id, path: worktree.path })),
+      ...folderWorkspaces.map((workspace) => ({
+        id: folderWorkspaceKey(workspace.id),
+        path: workspace.folderPath
+      }))
+    ]
+    const knownIds = new Set(surfaces.map((surface) => surface.id))
+    for (const portal of canvasTerminalPortals) {
+      if (knownIds.has(portal.worktreeId)) continue
+      surfaces.push({
+        id: portal.worktreeId,
+        path: activeWorktreeId ? allWorktrees.find((worktree) => worktree.id === activeWorktreeId)?.path ?? '' : ''
+      })
+      knownIds.add(portal.worktreeId)
+    }
+    return surfaces
+  }, [activeWorktreeId, allWorktrees, canvasTerminalPortals, folderWorkspaces])
   const foregroundTerminalTabIds = useMemo(() => {
     const ids = new Set<string>()
     if (activeView === 'terminal' && activeTabType === 'terminal' && activeTabId) {
@@ -379,6 +388,8 @@ function Terminal(): React.JSX.Element | null {
   const effectiveActiveLayout = renderedActiveWorktreeId
     ? getEffectiveLayoutForWorktree(renderedActiveWorktreeId)
     : undefined
+  const hasCanvasPortalSurface = canvasTerminalPortals.length > 0
+  const hasVisibleTerminalSurface = Boolean(effectiveActiveLayout || hasCanvasPortalSurface)
   const activeWorktreeBrowserTabIdsKey = renderedActiveWorktreeId
     ? (browserTabsByWorktree[renderedActiveWorktreeId] ?? []).map((tab) => tab.id).join(',')
     : ''
@@ -971,6 +982,14 @@ function Terminal(): React.JSX.Element | null {
     // Why: a real activation supersedes any targeted background mount — the
     // visible worktree needs all of its tabs.
     backgroundMountTabIdsByWorktreeRef.current.delete(renderedActiveWorktreeId)
+  }
+  if (workspaceSessionReady && activeView === 'canvas') {
+    // Canvas terminals may use the floating workspace when no worktree is
+    // active. Keep that portal owner mounted so its PTY can render into the
+    // canvas node instead of stopping at the placeholder card.
+    for (const portal of canvasTerminalPortals) {
+      mountedWorktreeIdsRef.current.add(portal.worktreeId)
+    }
   }
   pruneClosedBackgroundMountTabs(
     backgroundMountTabIdsByWorktreeRef.current,
@@ -1992,7 +2011,7 @@ function Terminal(): React.JSX.Element | null {
 
   return (
     <div
-      className={`flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden${renderedActiveWorktreeId ? '' : ' hidden'}`}
+      className={`flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden${renderedActiveWorktreeId || hasCanvasPortalSurface ? '' : ' hidden'}`}
       data-rendered-active-worktree-id={renderedActiveWorktreeId ?? undefined}
     >
       <EditorAutosaveController />
@@ -2060,9 +2079,9 @@ function Terminal(): React.JSX.Element | null {
           — tab groups + terminal extend to the top of the window instead.
           The old summary label (workspace / active surface) is removed. */}
 
-      {anyMountedWorktreeHasLayout ? (
+      {anyMountedWorktreeHasLayout || hasCanvasPortalSurface ? (
         <div
-          className={`relative flex flex-1 min-w-0 min-h-0 overflow-hidden${effectiveActiveLayout ? '' : ' hidden'}`}
+          className={`relative flex flex-1 min-w-0 min-h-0 overflow-hidden${hasVisibleTerminalSurface ? '' : ' hidden'}`}
         >
           {/* Why: each mounted worktree surface is absolutely positioned so we
               can preserve hidden trees without reflowing the active one. Keep
@@ -2105,7 +2124,7 @@ function Terminal(): React.JSX.Element | null {
         </div>
       ) : null}
 
-      {!effectiveActiveLayout && !anyMountedWorktreeHasLayout && (
+      {!effectiveActiveLayout && !anyMountedWorktreeHasLayout && !hasCanvasPortalSurface && (
         <>
           {/* Why: split-group layouts render their own terminal/browser/editor
               surfaces through TabGroupPanel plus stable overlay layers.

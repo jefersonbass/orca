@@ -100,6 +100,87 @@ const CANVAS_DEFAULT_EDGE_OPTIONS = {
   style: { stroke: '#60a5fa', strokeWidth: 2.5 },
 }
 const CANVAS_CONNECTION_LINE_STYLE = { stroke: '#60a5fa', strokeWidth: 3 }
+const CANVAS_COLLISION_GAP = 0
+const CANVAS_SNAP_DISTANCE = 24
+
+type CanvasRect = { x: number; y: number; width: number; height: number }
+
+function flowNodeRect(node: Node): CanvasRect {
+  return {
+    x: node.position.x,
+    y: node.position.y,
+    width: node.width ?? node.measured?.width ?? 0,
+    height: node.height ?? node.measured?.height ?? 0,
+  }
+}
+
+function rectsOverlap(a: CanvasRect, b: CanvasRect): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+}
+
+function resolveDraggedNodePositions(nodes: Node[], draggedIds: Set<string>): Map<string, { x: number; y: number }> {
+  const positions = new Map(nodes.map((node) => [node.id, { ...node.position }]))
+  const dragged = nodes.filter((node) => draggedIds.has(node.id))
+  const obstacles = nodes.filter((node) => !draggedIds.has(node.id) && node.type !== 'group')
+
+  // Move the whole selected set away from the nearest collision. Resolving in
+  // stable order also prevents two selected nodes from ending up on top of one
+  // another when they were already close before a multi-drag.
+  for (let pass = 0; pass < 8; pass += 1) {
+    let changed = false
+    for (const node of dragged) {
+      const position = positions.get(node.id)
+      if (!position) continue
+      let rect = { ...flowNodeRect(node), x: position.x, y: position.y }
+      const priorDragged = dragged
+        .slice(0, dragged.indexOf(node))
+        .map((prior) => {
+          const priorPosition = positions.get(prior.id) ?? prior.position
+          return { ...flowNodeRect(prior), x: priorPosition.x, y: priorPosition.y }
+        })
+      const blockingRects = [...obstacles.map(flowNodeRect), ...priorDragged]
+      for (const fixed of blockingRects) {
+        if (!rectsOverlap(rect, fixed)) {
+          const verticallyAligned = rect.y < fixed.y + fixed.height && rect.y + rect.height > fixed.y
+          const horizontallyAligned = rect.x < fixed.x + fixed.width && rect.x + rect.width > fixed.x
+          const snapX = verticallyAligned && Math.abs(rect.x + rect.width - fixed.x) <= CANVAS_SNAP_DISTANCE
+            ? fixed.x - rect.width - CANVAS_COLLISION_GAP
+            : verticallyAligned && Math.abs(fixed.x + fixed.width - rect.x) <= CANVAS_SNAP_DISTANCE
+              ? fixed.x + fixed.width + CANVAS_COLLISION_GAP
+              : null
+          const snapY = horizontallyAligned && Math.abs(rect.y + rect.height - fixed.y) <= CANVAS_SNAP_DISTANCE
+            ? fixed.y - rect.height - CANVAS_COLLISION_GAP
+            : horizontallyAligned && Math.abs(fixed.y + fixed.height - rect.y) <= CANVAS_SNAP_DISTANCE
+              ? fixed.y + fixed.height + CANVAS_COLLISION_GAP
+              : null
+          if (snapX !== null) {
+            position.x = snapX
+            rect = { ...rect, x: snapX }
+            changed = true
+          } else if (snapY !== null) {
+            position.y = snapY
+            rect = { ...rect, y: snapY }
+            changed = true
+          }
+          continue
+        }
+        const candidates = [
+          { dx: fixed.x + fixed.width + CANVAS_COLLISION_GAP - rect.x, dy: 0 },
+          { dx: fixed.x - (rect.x + rect.width) - CANVAS_COLLISION_GAP, dy: 0 },
+          { dx: 0, dy: fixed.y + fixed.height + CANVAS_COLLISION_GAP - rect.y },
+          { dx: 0, dy: fixed.y - (rect.y + rect.height) - CANVAS_COLLISION_GAP },
+        ]
+        const correction = candidates.sort((a, b) => Math.abs(a.dx) + Math.abs(a.dy) - Math.abs(b.dx) - Math.abs(b.dy))[0]
+        position.x += correction.dx
+        position.y += correction.dy
+        rect = { ...rect, x: position.x, y: position.y }
+        changed = true
+      }
+    }
+    if (!changed) break
+  }
+  return positions
+}
 
 const CanvasEdgeOverlay: React.FC<{ nodes: CanvasNodeDocument[]; edges: CanvasEdgeDocument[] }> = ({ nodes, edges }) => (
   <ViewportPortal>
@@ -358,12 +439,13 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   }, [activeTool, toCanvasPoint])
 
   const onCanvasPointerMoveCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (activeTool === 'link') setLinkPointer(toCanvasPoint(event))
     const start = drawingRef.current
     if (!start) return
     updateDraftRect(start, toCanvasPoint(event))
     event.preventDefault()
     event.stopPropagation()
-  }, [toCanvasPoint, updateDraftRect])
+  }, [activeTool, toCanvasPoint, updateDraftRect])
 
   const onCanvasPointerUpCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!drawingRef.current) return
@@ -377,17 +459,47 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
 
   const onNodeDragStop = useCallback((_event: any, node: any) => {
     if (node.type === 'group') return
-    const center = {
-      x: node.position.x + (node.width ?? node.measured?.width ?? 0) / 2,
-      y: node.position.y + (node.height ?? node.measured?.height ?? 0) / 2,
+    const currentNodes = flowNodesRef.current
+    const draggedIds = new Set(currentNodes.filter((candidate) => candidate.selected).map((candidate) => candidate.id))
+    draggedIds.add(node.id)
+    const correctedPositions = resolveDraggedNodePositions(currentNodes, draggedIds)
+    const correctedNodes = currentNodes.map((candidate) => {
+      const position = correctedPositions.get(candidate.id)
+      return position ? { ...candidate, position } : candidate
+    })
+    const corrected = correctedNodes.some((candidate) => {
+      const previous = currentNodes.find((item) => item.id === candidate.id)
+      return previous && (previous.position.x !== candidate.position.x || previous.position.y !== candidate.position.y)
+    })
+    if (corrected) {
+      flowNodesRef.current = correctedNodes
+      setFlowNodes(correctedNodes)
     }
+    const correctedNode = correctedNodes.find((candidate) => candidate.id === node.id) ?? node
+    const correctedRect = flowNodeRect(correctedNode)
     const frame = canvasDocumentNodes.find((candidate) => {
       if (candidate.type !== 'group' || candidate.id === node.id) return false
+      const center = {
+        x: correctedRect.x + correctedRect.width / 2,
+        y: correctedRect.y + correctedRect.height / 2,
+      }
       return center.x >= candidate.position.x && center.x <= candidate.position.x + candidate.size.width
         && center.y >= candidate.position.y && center.y <= candidate.position.y + candidate.size.height
     })
     onNodeDroppedOnFrame?.(node.id, frame?.id ?? null)
-  }, [canvasDocumentNodes, onNodeDroppedOnFrame])
+    if (corrected) {
+      const document = useAppStore.getState().canvasDocument
+      if (document) {
+        useAppStore.getState().setCanvasDocument({
+          ...document,
+          nodes: document.nodes.map((documentNode) => {
+            const correctedNode = correctedNodes.find((candidate) => candidate.id === documentNode.id)
+            return correctedNode ? { ...documentNode, position: correctedNode.position } : documentNode
+          }),
+        })
+      }
+    }
+  }, [canvasDocumentNodes, onNodeDroppedOnFrame, setFlowNodes])
 
   useEffect(() => {
     if (!drawing) return
@@ -406,7 +518,14 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     if (!linkStartNodeId) return
     pendingClickSourceRef.current = linkStartNodeId
     setConnecting(true)
-  }, [linkStartNodeId])
+    const source = canvasDocumentNodes.find((node) => node.id === linkStartNodeId)
+    if (source) {
+      setLinkPointer({
+        x: source.position.x + source.size.width / 2,
+        y: source.position.y + source.size.height / 2,
+      })
+    }
+  }, [canvasDocumentNodes, linkStartNodeId])
 
   useEffect(() => {
     if (activeTool === 'link') return
@@ -522,8 +641,9 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     edgesFocusable: true,
     deleteKeyCode: 'Delete',
     multiSelectionKeyCode: 'Shift',
-    selectionOnDrag: true,
+    selectionOnDrag: activeTool === 'select',
     selectNodesOnDrag: true,
+    selectionMode: 'partial',
     ariaLabel: 'Canvas workspace',
     onNodeContextMenu: (event: any, node: any) => {
       event.preventDefault()
@@ -543,7 +663,10 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     connectionLineType: 'bezier',
     colorMode: isDark ? 'dark' : 'light',
     className: 'canvas-flow',
-    panOnDrag: activeTool === 'select',
+    // Left-drag on empty canvas is the marquee selector. Middle/right drag
+    // remains available for panning, which keeps the pointer tool useful for
+    // both selection and navigation.
+    panOnDrag: activeTool === 'select' ? [1, 2] : false,
     onPaneMouseMove,
     onNodeDragStop,
   }

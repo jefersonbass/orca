@@ -62,9 +62,8 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
 
     // Keyboard focus handler — focus the terminal on click
     const handleFocus = useCallback(() => {
-      if (!paneKey) return
       portalRef.current?.querySelector<HTMLElement>('.xterm-helper-textarea')?.focus()
-    }, [paneKey])
+    }, [])
 
     return (
       <div
@@ -106,7 +105,7 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
         {/* Portal target — xterm surface renders here */}
         <div
           ref={portalRef}
-          className="flex h-[calc(100%-32px)] w-full items-center justify-center"
+          className="relative flex h-[calc(100%-32px)] w-full min-h-0 items-center justify-center"
           onClick={handleFocus}
           data-pane-key={paneKey}
         >

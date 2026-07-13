@@ -121,7 +121,7 @@ export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
         {/* Portal target — agent terminal xterm surface renders here */}
         <div
           ref={portalRef}
-          className="flex h-[calc(100%-32px)] w-full items-center justify-center"
+          className="relative flex h-[calc(100%-32px)] w-full min-h-0 items-center justify-center"
           onClick={handleFocus}
           data-pane-key={paneKey}
         >

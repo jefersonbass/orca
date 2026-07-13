@@ -46,12 +46,12 @@ export function useCanvasTerminalPortals(enabled: boolean): CanvasPortalTarget[]
 export function findCanvasPortal(
   targets: CanvasPortalTarget[],
   match: { paneKey?: string; tabId?: string }
-): CanvasPortalTarget | undefined {
+): CanvasPortalTarget | null {
   return targets.find(
     (t) =>
       (match.paneKey !== undefined && t.paneKey === match.paneKey) ||
       (match.tabId !== undefined && t.tabId === match.tabId)
-  )
+  ) ?? null
 }
 
 export function getCanvasPortalTargets(): CanvasPortalTarget[] {

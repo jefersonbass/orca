@@ -112,6 +112,7 @@ const CanvasPageInner: React.FC = () => {
         // creation flow passes its resourceRef explicitly, but the fallback
         // keeps the empty-state and keyboard affordances functional too.
         if (type === 'live-terminal' && !resourceRef) {
+          appState.ensureWorktreeRootGroup(canvasRuntimeWorktreeId)
           const command = typeof extraMetadata?.command === 'string' ? extraMetadata.command.trim() : ''
           const cwd = typeof extraMetadata?.cwd === 'string' ? extraMetadata.cwd.trim() : ''
           const result = command
@@ -125,6 +126,7 @@ const CanvasPageInner: React.FC = () => {
           resourceRef = { kind: 'terminal-tab', tabId, worktreeId: canvasRuntimeWorktreeId }
         }
         if (type === 'agent-terminal' && !resourceRef) {
+          appState.ensureWorktreeRootGroup(canvasRuntimeWorktreeId)
           const requestedAgent = extraMetadata?.agent
           const agent: TuiAgent = typeof requestedAgent === 'string' ? requestedAgent as TuiAgent : 'codex'
           const result = launchAgentInNewTab({ agent, worktreeId: canvasRuntimeWorktreeId, launchSource: 'canvas' })
@@ -202,6 +204,7 @@ const CanvasPageInner: React.FC = () => {
     if (!terminalDraft) return
     const type: AddNodeType = terminalDraft.kind === 'agent' ? 'agent-terminal' : 'live-terminal'
     let resourceRef: CanvasResourceReference | undefined
+    useAppStore.getState().ensureWorktreeRootGroup(canvasRuntimeWorktreeId)
     if (terminalDraft.kind === 'agent') {
       const result = launchAgentInNewTab({
         agent: draft.agent ?? 'codex',
