@@ -4,8 +4,9 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useAppStore } from '@/store'
 import { CanvasAnchors } from '../CanvasAnchors'
+import { CanvasNodeResizer } from '../CanvasNodeResizer'
 
-type NoteNodeType = Node<{ label: string; content?: string; color?: string }, 'note'>
+type NoteNodeType = Node<{ label: string; content?: string; color?: string; resizeEnabled?: boolean }, 'note'>
 
 // Simple markdown component for note display
 const NoteMarkdown: React.FC<{ content: string }> = ({ content }) => (
@@ -107,6 +108,7 @@ export const NoteNode: React.FC<NodeProps<NoteNodeType>> = React.memo(
             <NoteMarkdown content={content} />
           )}
         </div>
+        <CanvasNodeResizer visible={data.resizeEnabled} minWidth={180} minHeight={100} />
         <CanvasAnchors active={selected || !!content} />
       </div>
     )

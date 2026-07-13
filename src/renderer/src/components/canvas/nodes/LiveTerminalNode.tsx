@@ -3,6 +3,7 @@ import type { NodeProps, Node } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
 import { setCanvasPortalTargets, getCanvasPortalTargets } from '../canvas-terminal-portal'
 import type { CanvasResourceReference } from '../../../../../shared/canvas-types'
+import { CanvasNodeResizer } from '../CanvasNodeResizer'
 
 type LiveTerminalNodeType = Node<
   {
@@ -12,6 +13,7 @@ type LiveTerminalNodeType = Node<
     sessionId?: string
     status?: 'connected' | 'disconnected' | 'connecting' | 'error'
     color?: string
+    resizeEnabled?: boolean
   },
   'live-terminal'
 >
@@ -117,8 +119,9 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
           )}
         </div>
 
-        <Handle type="source" position={Position.Bottom} className={`!size-3 !border-2 !border-blue-300 !bg-blue-500 ${hasTerminal ? '!opacity-100' : '!opacity-30'}`} />
-        <Handle type="target" position={Position.Top} className={`!size-3 !border-2 !border-emerald-300 !bg-emerald-500 ${hasTerminal ? '!opacity-100' : '!opacity-30'}`} />
+        <CanvasNodeResizer visible={data.resizeEnabled} minWidth={260} minHeight={150} />
+        <Handle type="source" position={Position.Bottom} className="!size-3 !border-0 !bg-transparent !opacity-0" />
+        <Handle type="target" position={Position.Top} className="!size-3 !border-0 !bg-transparent !opacity-0" />
       </div>
     )
   })

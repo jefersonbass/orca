@@ -2,9 +2,10 @@ import React, { useState, useRef, useEffect } from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { useAppStore } from '@/store'
 import { CanvasAnchors } from '../CanvasAnchors'
+import { CanvasNodeResizer } from '../CanvasNodeResizer'
 
 type StickyNoteType = Node<
-  { label: string; content?: string; color?: string },
+  { label: string; content?: string; color?: string; resizeEnabled?: boolean },
   'sticky-note'
 >
 
@@ -78,6 +79,7 @@ export const StickyNoteNode: React.FC<NodeProps<StickyNoteType>> = React.memo(
             </span>
           )}
         </div>
+        <CanvasNodeResizer visible={data.resizeEnabled} minWidth={160} minHeight={100} />
         <CanvasAnchors active={selected || !!text} />
       </div>
     )

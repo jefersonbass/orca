@@ -2,10 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { CanvasAnchors } from '../CanvasAnchors'
 import { useAppStore } from '@/store'
+import { CanvasNodeResizer } from '../CanvasNodeResizer'
 
 type ShapeType = 'label' | 'rectangle' | 'arrow' | 'highlight'
 type ShapeNodeType = Node<
-  { label?: string; color?: string; shapeType: ShapeType; type?: string; width?: number; height?: number },
+  { label?: string; color?: string; shapeType: ShapeType; type?: string; width?: number; height?: number; resizeEnabled?: boolean },
   ShapeType
 >
 
@@ -116,6 +117,7 @@ export const BasicShapeNode: React.FC<NodeProps<ShapeNodeType>> = React.memo(
         onDoubleClick={() => setEditing(true)}
       >
         {renderContent()}
+        <CanvasNodeResizer visible={data.resizeEnabled} minWidth={80} minHeight={32} />
         <CanvasAnchors active={selected} />
       </div>
     )

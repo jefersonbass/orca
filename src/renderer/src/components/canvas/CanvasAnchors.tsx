@@ -20,7 +20,10 @@ export const CanvasAnchors: React.FC<{ active?: boolean }> = ({ active = true })
         id={id}
         type={type}
         position={position}
-        className={`!size-3 !border-2 ${type === 'source' ? '!border-blue-300 !bg-blue-500' : '!border-emerald-300 !bg-emerald-500'} ${active ? '!opacity-100' : '!opacity-0'}`}
+        // Handles stay in the DOM for connection hit-testing, but are visually
+        // transparent. The selected outline/action bar is the node affordance;
+        // the old green/blue dots added noise without communicating state.
+        className={`!size-3 !border-0 !bg-transparent !opacity-0 ${active ? 'pointer-events-auto' : 'pointer-events-none'}`}
         aria-label={`${type} ${String(position)}`}
       />
     ))}

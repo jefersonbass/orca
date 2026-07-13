@@ -35,7 +35,7 @@ export type CanvasResourceReference =
   | { kind: 'diff'; worktreeId: string; diffId: string }
   | { kind: 'pull-request'; source: 'github' | 'gitlab'; id: string }
   | { kind: 'task'; source: 'orca' | 'github' | 'gitlab' | 'linear' | 'jira'; taskId: string }
-  | { kind: 'browser-preview'; url: string; title?: string }
+  | { kind: 'browser-preview'; url: string; title?: string; tabId?: string; worktreeId?: string }
   | { kind: 'browser-session'; sessionId: string; workspaceId?: string }
 
 // ── Semantic Edge ──

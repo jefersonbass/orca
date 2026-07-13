@@ -222,6 +222,8 @@ export type CanvasSurfaceProps = {
   linkStartNodeId?: string | null
   activeTool?: CanvasTool
   onCreateRect?: (tool: CanvasTool, rect: { x: number; y: number; width: number; height: number }) => void
+  onConnectingChange?: (connecting: boolean) => void
+  resizeNodeId?: string | null
 }
 
 
@@ -239,6 +241,8 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   linkStartNodeId,
   activeTool = 'select',
   onCreateRect,
+  onConnectingChange,
+  resizeNodeId,
 }) => {
   const [connecting, setConnecting] = useState(false)
   const [drawing, setDrawing] = useState<{ x: number; y: number } | null>(null)
@@ -251,6 +255,10 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   const draftRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
   const [isDark, setIsDark] = useState(true)
   const onEdgeCreatedRef = useRef(onEdgeCreated)
+
+  useEffect(() => {
+    onConnectingChange?.(connecting)
+  }, [connecting, onConnectingChange])
 
   useEffect(() => {
     onEdgeCreatedRef.current = onEdgeCreated
@@ -275,7 +283,7 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     width: docNode.size.width,
     height: docNode.size.height,
     zIndex: docNode.type === 'group' ? docNode.zIndex - 1000 : docNode.zIndex,
-    data: { ...docNode, ...docNode.metadata, childCount: canvasDocumentNodes.filter((node) => node.groupId === docNode.id).length } as any,
+    data: { ...docNode, ...docNode.metadata, resizeEnabled: resizeNodeId === docNode.id, childCount: canvasDocumentNodes.filter((node) => node.groupId === docNode.id).length } as any,
     selected: selectedNodeIdsRef.current.has(docNode.id),
   }))
 
@@ -297,12 +305,12 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
       id: docNode.id, type: docNode.type, position: docNode.position,
       width: docNode.size.width, height: docNode.size.height,
       zIndex: docNode.type === 'group' ? docNode.zIndex - 1000 : docNode.zIndex,
-      data: { ...docNode, ...docNode.metadata, childCount: canvasDocumentNodes.filter((node) => node.groupId === docNode.id).length } as any,
+      data: { ...docNode, ...docNode.metadata, resizeEnabled: resizeNodeId === docNode.id, childCount: canvasDocumentNodes.filter((node) => node.groupId === docNode.id).length } as any,
       selected: selectedNodeIdsRef.current.has(docNode.id)
     }))
     flowNodesRef.current = nextNodes
     setFlowNodes(nextNodes)
-  }, [canvasDocumentNodes, setFlowNodes])
+  }, [canvasDocumentNodes, resizeNodeId, setFlowNodes])
 
   useEffect(() => {
     setFlowEdges(canvasEdges.map((edge) => ({
@@ -679,11 +687,6 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
       onPointerUpCapture={onCanvasPointerUpCapture}
       onPointerCancel={onCanvasPointerUpCapture}
     >
-      {connecting && (
-        <div className="pointer-events-none absolute left-1/2 top-3 z-50 -translate-x-1/2 rounded-full border border-blue-400/40 bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-300 shadow-lg backdrop-blur">
-          Connecting… drag or click a target handle
-        </div>
-      )}
       {React.createElement(ReactFlow as any, flowProps,
         React.createElement(Background, {
           variant: BackgroundVariant.Lines,

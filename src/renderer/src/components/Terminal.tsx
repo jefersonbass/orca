@@ -98,6 +98,7 @@ import {
   useCanvasTerminalPortals,
   type CanvasPortalTarget
 } from './canvas/canvas-terminal-portal'
+import { useCanvasBrowserPortals } from './canvas/canvas-browser-portal'
 import { isRemoteRuntimePtyId } from '@/runtime/runtime-terminal-inspection'
 import {
   activateWebRuntimeSessionTab,
@@ -314,6 +315,7 @@ function Terminal(): React.JSX.Element | null {
   const canvasTerminalPortals: CanvasPortalTarget[] = useCanvasTerminalPortals(
     activeView === 'canvas'
   )
+  const canvasBrowserPortals = useCanvasBrowserPortals(activeView === 'canvas')
   const workspaceSurfaces = useMemo(() => {
     const surfaces = [
       ...allWorktrees.map((worktree) => ({ id: worktree.id, path: worktree.path })),
@@ -2115,6 +2117,8 @@ function Terminal(): React.JSX.Element | null {
                   shouldMeasureHiddenWorktree={shouldMeasureHiddenWorktree}
                   shouldColdParkTerminalPanes={shouldColdParkTerminalPanes}
                   activityTerminalPortals={activityTerminalPortals}
+                  canvasTerminalPortals={canvasTerminalPortals}
+                  canvasBrowserPortals={canvasBrowserPortals}
                   backgroundMountTabIds={
                     backgroundMountTabIdsByWorktreeRef.current.get(workspace.id) ?? null
                   }
@@ -2431,6 +2435,8 @@ const WorktreeSplitSurface = React.memo(function WorktreeSplitSurface({
   shouldMeasureHiddenWorktree,
   shouldColdParkTerminalPanes,
   activityTerminalPortals,
+  canvasTerminalPortals,
+  canvasBrowserPortals,
   backgroundMountTabIds
 }: {
   worktreeId: string
@@ -2441,6 +2447,8 @@ const WorktreeSplitSurface = React.memo(function WorktreeSplitSurface({
   shouldMeasureHiddenWorktree: boolean
   shouldColdParkTerminalPanes: boolean
   activityTerminalPortals: ActivityTerminalPortalTarget[]
+  canvasTerminalPortals: CanvasPortalTarget[]
+  canvasBrowserPortals: import('./canvas/canvas-browser-portal').CanvasBrowserPortalTarget[]
   backgroundMountTabIds: ReadonlySet<string> | null
 }): React.JSX.Element {
   const browserPageIds = useAppStore(
@@ -2483,11 +2491,16 @@ const WorktreeSplitSurface = React.memo(function WorktreeSplitSurface({
         coldParkTerminalPanes={shouldColdParkTerminalPanes}
         shouldMeasureHiddenWorktree={shouldMeasureHiddenWorktree}
         activityTerminalPortals={activityTerminalPortals}
+        canvasTerminalPortals={canvasTerminalPortals.filter((portal) => portal.worktreeId === worktreeId)}
         backgroundMountTabIds={backgroundMountTabIds}
       />
       {isVisible || backgroundMountTabIds === null ? (
         <>
-          <BrowserPaneOverlayLayer worktreeId={worktreeId} isWorktreeActive={isVisible} />
+          <BrowserPaneOverlayLayer
+            worktreeId={worktreeId}
+            isWorktreeActive={isVisible || canvasBrowserPortals.some((portal) => portal.worktreeId === worktreeId)}
+            canvasBrowserPortals={canvasBrowserPortals.filter((portal) => portal.worktreeId === worktreeId)}
+          />
           <EmulatorPaneOverlayLayer worktreeId={worktreeId} isWorktreeActive={isVisible} />
         </>
       ) : null}

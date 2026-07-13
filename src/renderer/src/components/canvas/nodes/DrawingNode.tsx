@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { CanvasAnchors } from '../CanvasAnchors'
 import { useAppStore } from '@/store'
+import { CanvasNodeResizer } from '../CanvasNodeResizer'
 
 type DrawingNodeType = Node<
   {
@@ -14,6 +15,7 @@ type DrawingNodeType = Node<
     opacity?: number
     lineStyle?: 'solid' | 'dashed' | 'dotted'
     color?: string
+    resizeEnabled?: boolean
   },
   'drawing'
 >
@@ -134,6 +136,7 @@ export const DrawingNode: React.FC<NodeProps<DrawingNodeType>> = React.memo(
             ) : <span className="text-center text-[13px] text-worktree-sidebar-foreground">{label}</span>}
           </div>
         )}
+        <CanvasNodeResizer visible={data.resizeEnabled} minWidth={80} minHeight={60} />
         <CanvasAnchors active={selected} />
       </div>
     )

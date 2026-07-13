@@ -44,6 +44,8 @@ const CanvasPageInner: React.FC = () => {
   const [rfReady, setRfReady] = useState(false)
   const [activeTool, setActiveTool] = useState<CanvasTool>('select')
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
+  const [resizeNodeId, setResizeNodeId] = useState<string | null>(null)
+  const [isConnecting, setIsConnecting] = useState(false)
   const [linkStartNodeId, setLinkStartNodeId] = useState<string | null>(null)
   const [terminalDraft, setTerminalDraft] = useState<{ kind: 'terminal' | 'agent'; rect: { x: number; y: number; width: number; height: number } } | null>(null)
   const [resourceDraft, setResourceDraft] = useState<{ kind: 'file' | 'folder' | 'browser'; rect: { x: number; y: number; width: number; height: number } } | null>(null)
@@ -191,11 +193,28 @@ const CanvasPageInner: React.FC = () => {
     const { kind, rect } = resourceDraft
     const type: AddNodeType = kind === 'file' ? 'file' : kind === 'folder' ? 'folder' : 'browser-preview'
     const metadata = kind === 'browser' ? { url: draft.value } : { relativePath: draft.value }
-    const resourceRef: CanvasResourceReference = kind === 'file'
-      ? { kind: 'file', worktreeId: activeWorktreeId ?? '', relativePath: draft.value }
-      : kind === 'folder'
-        ? { kind: 'folder', worktreeId: activeWorktreeId ?? '', relativePath: draft.value }
-        : { kind: 'browser-preview', url: draft.value, title: draft.label }
+    let resourceRef: CanvasResourceReference
+    if (kind === 'file') {
+      resourceRef = { kind: 'file', worktreeId: activeWorktreeId ?? '', relativePath: draft.value }
+    } else if (kind === 'folder') {
+      resourceRef = { kind: 'folder', worktreeId: activeWorktreeId ?? '', relativePath: draft.value }
+    } else {
+      const state = useAppStore.getState()
+      const worktreeId = activeWorktreeId ?? FLOATING_TERMINAL_WORKTREE_ID
+      const targetGroupId = state.ensureWorktreeRootGroup(worktreeId)
+      const browserTab = state.createBrowserTab(worktreeId, draft.value, {
+        title: draft.label,
+        activate: false,
+        targetGroupId,
+      })
+      resourceRef = {
+        kind: 'browser-preview',
+        url: draft.value,
+        title: draft.label,
+        tabId: browserTab.id,
+        worktreeId,
+      }
+    }
     handleAddNode(type, { x: rect.x, y: rect.y }, { width: rect.width, height: rect.height }, metadata, draft.label, resourceRef)
     setResourceDraft(null)
   }, [activeWorktreeId, handleAddNode, resourceDraft])
@@ -256,6 +275,7 @@ const CanvasPageInner: React.FC = () => {
 
   const handleToolChange = useCallback((tool: CanvasTool) => {
     setActiveTool(tool)
+    if (tool !== 'select') setResizeNodeId(null)
     if (tool !== 'link') setLinkStartNodeId(null)
   }, [])
 
@@ -392,6 +412,7 @@ const CanvasPageInner: React.FC = () => {
   const handleEditSelectedNode = useCallback(() => {
     const selectedId = selectedNodeIds[0]
     if (!selectedId) return
+    setResizeNodeId((current) => current === selectedId ? null : selectedId)
     const element = Array.from(document.querySelectorAll<HTMLElement>('.react-flow__node')).find((candidate) => candidate.dataset.id === selectedId)
     element?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
   }, [selectedNodeIds])
@@ -614,6 +635,8 @@ const CanvasPageInner: React.FC = () => {
             onCreateRect={handleCreateRect}
             onNodeDroppedOnFrame={handleNodeDroppedOnFrame}
             onSelectionChange={setSelectedNodeIds}
+            onConnectingChange={setIsConnecting}
+            resizeNodeId={resizeNodeId}
             linkStartNodeId={linkStartNodeId}
             onViewportChange={handleViewportChange}
             onInit={handleInit}
@@ -623,6 +646,11 @@ const CanvasPageInner: React.FC = () => {
             onEdgeCreated={handleEdgeCreated}
           />
         </React.Suspense>
+        {isConnecting && (
+          <div className="pointer-events-none absolute left-1/2 top-[76px] z-30 -translate-x-1/2 rounded-full border border-blue-400/40 bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-300 shadow-lg backdrop-blur">
+            Connecting… drag or click a target handle
+          </div>
+        )}
         {!hasNodes && (
           <div className="pointer-events-none absolute inset-0">
             <div className="size-full">

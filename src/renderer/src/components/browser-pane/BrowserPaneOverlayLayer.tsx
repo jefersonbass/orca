@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { memo, useCallback, useMemo } from 'react'
 import { registerBrowserOverlaySlotViewport } from './browser-page-viewport'
 import { useShallow } from 'zustand/react/shallow'
@@ -7,6 +8,7 @@ import BrowserPane from './BrowserPane'
 import { tabGroupBodyAnchorName } from '../tab-group/tab-group-body-anchor'
 import { useBrowserAutomationVisibilityForAny } from './browser-automation-visibility'
 import { useBrowserMobileDriverForAny } from '@/lib/pane-manager/browser-mobile-driver-state'
+import { findCanvasBrowserPortal, type CanvasBrowserPortalTarget } from '../canvas/canvas-browser-portal'
 
 // Why: Electron `<webview>` destroys its guest contents whenever its DOM
 // parent changes. Rendering paintable BrowserPanes at the worktree level
@@ -138,10 +140,12 @@ const BrowserOverlaySlot = memo(function BrowserOverlaySlot({
 // entirely when its own props are unchanged keeps the fast path fastest.
 const BrowserPaneOverlayLayer = memo(function BrowserPaneOverlayLayer({
   worktreeId,
-  isWorktreeActive
+  isWorktreeActive,
+  canvasBrowserPortals = []
 }: {
   worktreeId: string
   isWorktreeActive: boolean
+  canvasBrowserPortals?: CanvasBrowserPortalTarget[]
 }): React.JSX.Element {
   const { browserTabs, unifiedTabs, groups } = useAppStore(
     useShallow((state) => ({
@@ -199,6 +203,14 @@ const BrowserPaneOverlayLayer = memo(function BrowserPaneOverlayLayer({
   return (
     <>
       {browserTabs.map((browserTab) => {
+        const canvasPortal = findCanvasBrowserPortal(canvasBrowserPortals, browserTab.id)
+        if (canvasPortal) {
+          return createPortal(
+            <BrowserPane browserTab={browserTab} isActive />,
+            canvasPortal.target,
+            `canvas-browser-${browserTab.id}`
+          )
+        }
         const assignment = assignments.get(browserTab.id)
         const isActive = Boolean(isWorktreeActive && assignment && assignment.isActiveInGroup)
         return (

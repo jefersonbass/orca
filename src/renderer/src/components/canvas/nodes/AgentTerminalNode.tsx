@@ -3,6 +3,7 @@ import type { NodeProps, Node } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
 import { getCanvasPortalTargets, setCanvasPortalTargets } from '../canvas-terminal-portal'
 import type { CanvasResourceReference } from '../../../../../shared/canvas-types'
+import { CanvasNodeResizer } from '../CanvasNodeResizer'
 
 type AgentTerminalNodeType = Node<
   {
@@ -13,6 +14,7 @@ type AgentTerminalNodeType = Node<
     agentStatus?: 'working' | 'blocked' | 'waiting' | 'done' | 'idle' | 'disconnected'
     sessionId?: string
     color?: string
+    resizeEnabled?: boolean
   },
   'agent-terminal'
 >
@@ -133,8 +135,9 @@ export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
           )}
         </div>
 
-        <Handle type="source" position={Position.Bottom} className={`!size-3 !border-2 !border-blue-300 !bg-blue-500 ${hasAgent ? '!opacity-100' : '!opacity-30'}`} />
-        <Handle type="target" position={Position.Top} className={`!size-3 !border-2 !border-emerald-300 !bg-emerald-500 ${hasAgent ? '!opacity-100' : '!opacity-30'}`} />
+        <CanvasNodeResizer visible={data.resizeEnabled} minWidth={260} minHeight={150} />
+        <Handle type="source" position={Position.Bottom} className="!size-3 !border-0 !bg-transparent !opacity-0" />
+        <Handle type="target" position={Position.Top} className="!size-3 !border-0 !bg-transparent !opacity-0" />
       </div>
     )
   })

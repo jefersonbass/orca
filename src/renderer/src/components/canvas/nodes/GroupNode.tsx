@@ -1,9 +1,10 @@
 import React from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { CanvasAnchors } from '../CanvasAnchors'
+import { CanvasNodeResizer } from '../CanvasNodeResizer'
 
 type GroupNodeType = Node<
-  { label: string; color?: string; childCount?: number },
+  { label: string; color?: string; childCount?: number; resizeEnabled?: boolean },
   'group'
 >
 
@@ -34,6 +35,7 @@ export const GroupNode: React.FC<NodeProps<GroupNodeType>> = React.memo(
             {data.childCount ? `${data.childCount} item${data.childCount === 1 ? '' : 's'} in frame` : 'Drag nodes into this frame to group them'}
           </span>
         </div>
+        <CanvasNodeResizer visible={data.resizeEnabled} minWidth={240} minHeight={140} />
         <CanvasAnchors active={selected} />
       </div>
     )

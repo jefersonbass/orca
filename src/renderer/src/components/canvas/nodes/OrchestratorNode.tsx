@@ -1,6 +1,7 @@
 import React from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
+import { CanvasNodeResizer } from '../CanvasNodeResizer'
 
 type OrchestratorNodeType = Node<
   {
@@ -12,6 +13,7 @@ type OrchestratorNodeType = Node<
       taskCount?: number
     }
     color?: string
+    resizeEnabled?: boolean
   },
   'orchestrator'
 >
@@ -76,8 +78,9 @@ export const OrchestratorNode: React.FC<NodeProps<OrchestratorNodeType>> = React
           )}
         </div>
 
-        <Handle type="source" position={Position.Bottom} className="!opacity-40" />
-        <Handle type="target" position={Position.Top} className="!opacity-40" />
+        <CanvasNodeResizer visible={data.resizeEnabled} minWidth={220} minHeight={100} />
+        <Handle type="source" position={Position.Bottom} className="!size-3 !border-0 !bg-transparent !opacity-0" />
+        <Handle type="target" position={Position.Top} className="!size-3 !border-0 !bg-transparent !opacity-0" />
       </div>
     )
   }

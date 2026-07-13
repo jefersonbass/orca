@@ -21,7 +21,13 @@ const resourceReferenceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('diff'), worktreeId: z.string(), diffId: z.string() }),
   z.object({ kind: z.literal('pull-request'), source: z.enum(['github', 'gitlab']), id: z.string() }),
   z.object({ kind: z.literal('task'), source: z.enum(['orca', 'github', 'gitlab', 'linear', 'jira']), taskId: z.string() }),
-  z.object({ kind: z.literal('browser-preview'), url: z.string(), title: z.string().optional() }),
+  z.object({
+    kind: z.literal('browser-preview'),
+    url: z.string(),
+    title: z.string().optional(),
+    tabId: z.string().optional(),
+    worktreeId: z.string().optional(),
+  }),
   z.object({ kind: z.literal('browser-session'), sessionId: z.string(), workspaceId: z.string().optional() })
 ])
 

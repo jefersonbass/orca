@@ -1,10 +1,11 @@
 import React from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
+import { CanvasNodeResizer } from '../CanvasNodeResizer'
 import { useBrowserSessionState } from '../use-canvas-integration'
 
 type BrowserSessionNodeType = Node<
-  { label: string; sessionId: string; activePage?: string; connected?: boolean; worktreeName?: string },
+  { label: string; sessionId: string; activePage?: string; connected?: boolean; worktreeName?: string; resizeEnabled?: boolean },
   'browser-session'
 >
 
@@ -42,6 +43,7 @@ export const BrowserSessionNode: React.FC<NodeProps<BrowserSessionNodeType>> = R
             <span>{data.sessionId}</span>
           </div>
         </div>
+        <CanvasNodeResizer visible={data.resizeEnabled} minWidth={240} minHeight={140} />
         <Handle type="source" position={Position.Bottom} className="!opacity-0" />
         <Handle type="target" position={Position.Top} className="!opacity-0" />
       </div>

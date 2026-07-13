@@ -9,6 +9,7 @@ import {
   findActivityTerminalPortal,
   type ActivityTerminalPortalTarget
 } from '../activity/activity-terminal-portal'
+import { findCanvasPortal, type CanvasPortalTarget } from '../canvas/canvas-terminal-portal'
 import TerminalPane from './TerminalPane'
 import { closeTerminalTab } from '../terminal/terminal-tab-actions'
 import { shouldMountBackgroundWorktreeTab } from '../terminal/background-terminal-worktree-mount'
@@ -59,6 +60,7 @@ type TerminalOverlaySlotProps = {
   isVisible: boolean
   isActive: boolean
   activityTerminalPortal: ActivityTerminalPortalTarget | null
+  canvasTerminalPortal: CanvasPortalTarget | null
   onFocusOwningGroup: ((groupId: string) => void) | undefined
   consumeSuppressedPtyExit: (ptyId: string) => boolean
   closeTab: (tabId: string) => void
@@ -76,6 +78,7 @@ const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
   isVisible,
   isActive,
   activityTerminalPortal,
+  canvasTerminalPortal,
   onFocusOwningGroup,
   consumeSuppressedPtyExit,
   closeTab,
@@ -228,13 +231,13 @@ const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
       key={`${terminalTabId}-${terminalGeneration ?? 0}`}
       tabId={terminalTabId}
       worktreeId={worktreeId}
-      cwd={startupCwd ?? worktreePath}
-      isActive={isActive || activityTerminalPortal?.active === true}
+      cwd={startupCwd || worktreePath || '.'}
+      isActive={isActive || activityTerminalPortal?.active === true || canvasTerminalPortal?.active === true}
       // Why: split-group changes reparent TabGroupPanel subtrees. Keeping the
       // TerminalPane mounted here preserves alt-screen TUI state while this
       // flag still lets hidden tabs throttle rendering.
-      isVisible={isVisible || activityTerminalPortal !== null}
-      isWorktreeActive={isWorktreeActive || activityTerminalPortal !== null}
+      isVisible={isVisible || activityTerminalPortal !== null || canvasTerminalPortal !== null}
+      isWorktreeActive={isWorktreeActive || activityTerminalPortal !== null || canvasTerminalPortal !== null}
       isolatedPaneKey={activityTerminalPortal?.paneKey ?? null}
       onPtyExit={(ptyId) => {
         if (consumeSuppressedPtyExit(ptyId)) {
@@ -267,6 +270,14 @@ const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
     )
   }
 
+  if (canvasTerminalPortal) {
+    return createPortal(
+      terminalPane,
+      canvasTerminalPortal.target,
+      `canvas-terminal-${terminalTabId}`
+    )
+  }
+
   return (
     <div
       ref={overlayRef}
@@ -290,6 +301,7 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
   coldParkTerminalPanes = false,
   shouldMeasureHiddenWorktree = false,
   activityTerminalPortals = EMPTY_ACTIVITY_PORTALS,
+  canvasTerminalPortals = [],
   backgroundMountTabIds = null
 }: {
   worktreeId: string
@@ -298,6 +310,7 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
   coldParkTerminalPanes?: boolean
   shouldMeasureHiddenWorktree?: boolean
   activityTerminalPortals?: ActivityTerminalPortalTarget[]
+  canvasTerminalPortals?: CanvasPortalTarget[]
   /** Non-null for targeted background mounts: only these terminal tabs get a
    *  TerminalPane, so waking one slept agent does not connect every saved tab. */
   backgroundMountTabIds?: ReadonlySet<string> | null
@@ -372,8 +385,10 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
     shouldMeasureHiddenWorktree,
     activityTerminalPortals
   })
+  const effectiveParkedTerminalTabIds =
+    canvasTerminalPortals.length > 0 ? new Set<string>() : parkedTerminalTabIds
 
-  if (!worktreePath) {
+  if (!worktreePath && canvasTerminalPortals.length === 0) {
     return null
   }
 
@@ -391,9 +406,15 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
             worktreeId,
             tabId: terminalTab.id
           })
+          const canvasTerminalPortal = findCanvasPortal(canvasTerminalPortals, {
+            tabId: terminalTab.id
+          })
+          const portalVisible = activityTerminalPortal !== null || canvasTerminalPortal !== null
+          const resolvedIsVisible = portalVisible || isVisible
+          const resolvedIsActive = portalVisible || isActive
           // Why: parking unmounts only the view; the parked watcher owns exit
           // and side-effect handling until this tab is eligible to remount.
-          if (parkedTerminalTabIds.has(terminalTab.id)) {
+          if (effectiveParkedTerminalTabIds.has(terminalTab.id)) {
             return null
           }
           return (
@@ -406,9 +427,10 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
               startupCwd={terminalTab.startupCwd}
               groupId={assignment?.groupId}
               isWorktreeActive={isWorktreeActive}
-              isVisible={isVisible}
-              isActive={isActive}
+              isVisible={resolvedIsVisible}
+              isActive={resolvedIsActive}
               activityTerminalPortal={activityTerminalPortal}
+              canvasTerminalPortal={canvasTerminalPortal}
               onFocusOwningGroup={focusOwningGroup}
               consumeSuppressedPtyExit={consumeSuppressedPtyExit}
               closeTab={closeTab}
