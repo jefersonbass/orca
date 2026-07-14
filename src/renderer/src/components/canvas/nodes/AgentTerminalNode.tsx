@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useCallback } from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
-import { Handle, Position } from '@xyflow/react'
+import { Handle, Position, useStore } from '@xyflow/react'
 import { getCanvasPortalTargets, setCanvasPortalTargets } from '../canvas-terminal-portal'
 import type { CanvasResourceReference } from '../../../../../shared/canvas-types'
 import { CanvasNodeResizer } from '../CanvasNodeResizer'
+import { canvasTerminalPortalStyle } from '../canvas-terminal-portal-geometry'
 
 type AgentTerminalNodeType = Node<
   {
@@ -41,6 +42,7 @@ const statusLabels: Record<string, string> = {
 export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
   React.memo(({ id, data, selected }) => {
     const portalRef = useRef<HTMLDivElement>(null)
+    const zoom = useStore((state) => state.transform[2])
     const resourceRef = data.resourceRef
     const paneKey =
       data.paneKey ??
@@ -123,14 +125,18 @@ export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
 
         {/* Portal target — agent terminal xterm surface renders here */}
         <div
-          ref={portalRef}
           className="nodrag nopan nowheel relative flex h-[calc(100%-32px)] w-full min-h-0 items-center justify-center"
           onClick={handleFocus}
           onPointerDown={(event) => event.stopPropagation()}
-          data-pane-key={paneKey}
         >
+          <div
+            ref={portalRef}
+            className="absolute left-0 top-0 flex min-h-0 items-center justify-center overflow-hidden"
+            style={canvasTerminalPortalStyle(zoom)}
+            data-pane-key={paneKey}
+          />
           {!hasAgent && (
-            <div className="flex flex-col items-center gap-2 px-4 text-center">
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center">
               <div className="text-xs text-worktree-sidebar-foreground/45">No live agent attached</div>
               <div className="text-[10px] text-worktree-sidebar-foreground/30">Add an agent from the + menu to start working</div>
             </div>

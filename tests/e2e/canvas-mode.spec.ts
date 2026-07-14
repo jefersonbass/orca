@@ -108,6 +108,22 @@ test.describe('Spatial Canvas', () => {
     await orcaPage.getByRole('button', { name: 'Fit view', exact: true }).click()
     const agentCard = orcaPage.locator('[aria-label^="Agent terminal:"]')
     await expect(agentCard).toBeVisible()
+    const xterm = agentCard.locator('.xterm').first()
+    await expect(xterm).toBeVisible()
+    await orcaPage.getByRole('button', { name: 'Zoom out' }).click()
+    await orcaPage.getByRole('button', { name: 'Zoom out' }).click()
+    await expect.poll(async () => orcaPage.locator('.react-flow__node-agent-terminal').evaluate((element) => element.getBoundingClientRect().width / (element as HTMLElement).offsetWidth)).toBeLessThan(0.95)
+    const terminalScale = await xterm.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      return {
+        x: rect.width / (element as HTMLElement).offsetWidth,
+        y: rect.height / (element as HTMLElement).offsetHeight,
+      }
+    })
+    expect(terminalScale.x).toBeGreaterThan(0.98)
+    expect(terminalScale.x).toBeLessThan(1.02)
+    expect(terminalScale.y).toBeGreaterThan(0.98)
+    expect(terminalScale.y).toBeLessThan(1.02)
     await noteCard.click()
     await orcaPage.getByRole('button', { name: 'Link selected node' }).click()
     await expect(orcaPage.getByText('Connecting from: Note')).toBeVisible()

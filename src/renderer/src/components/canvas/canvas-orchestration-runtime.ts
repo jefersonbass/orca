@@ -11,6 +11,7 @@ import {
   failTaskForDelivery,
   persistWorkflowMessage
 } from './canvas-workflow-progression'
+import { CanvasContextDeliveryGate } from './canvas-context-delivery-gate'
 
 function messageId(): string {
   return `msg_${crypto.randomUUID()}`
@@ -181,57 +182,71 @@ function contextMessageForBinding(binding: ContextBinding): AgentCanvasMessage |
 
 const contextUpdateQueues = new Map<string, Promise<void>>()
 const autoContextDeliveryInFlight = new Set<string>()
+const contextDeliveryGate = new CanvasContextDeliveryGate()
 
 async function deliverCanvasContextUpdate(
   binding: ContextBinding,
-  content: string,
+  changeToken: string,
   attempt = 0
 ): Promise<void> {
   const store = useAppStore.getState()
   const liveSource = await resolveCanvasNodeContent(binding.sourceNodeId)
-  const message = prepareContextDelivery(
-    binding,
-    undefined,
-    `[Canvas resource update]\nThe linked ${binding.sourceNodeId} item changed. Treat this as the latest authoritative content and act on it if it contains an instruction.\n\n${liveSource.content || content}`
-  )
-  const queued = transitionCanvasMessage(message, 'queued', 'system')
-  persistWorkflowMessage(queued)
-  const ref = referenceForAgentNode(binding.targetAgentNodeId)
-  const target = ref ? resolveCanvasAgent(ref, store.agentStatusByPaneKey) : { ok: false as const, error: 'Target agent node has no live resource reference' }
-  if (!target.ok) {
-    if (attempt < 8) {
-      window.setTimeout(() => { void deliverCanvasContextUpdate(binding, content, attempt + 1) }, 1_500)
+  if (liveSource.resourceType === 'missing') return
+  const deliverySignature = `${liveSource.resourceType}\0${liveSource.content}\0${changeToken}`
+  if (!contextDeliveryGate.begin(binding.id, deliverySignature, attempt > 0)) return
+
+  try {
+    const message = prepareContextDelivery(
+      binding,
+      undefined,
+      `[Canvas resource update]\nThe linked ${binding.sourceNodeId} item changed. Treat this as the latest authoritative content and act on it if it contains an instruction.\n\n${liveSource.content}`
+    )
+    const queued = transitionCanvasMessage(message, 'queued', 'system')
+    persistWorkflowMessage(queued)
+    const ref = referenceForAgentNode(binding.targetAgentNodeId)
+    const target = ref ? resolveCanvasAgent(ref, store.agentStatusByPaneKey) : { ok: false as const, error: 'Target agent node has no live resource reference' }
+    if (!target.ok) {
+      if (attempt < 8) {
+        window.setTimeout(() => { void deliverCanvasContextUpdate(binding, changeToken, attempt + 1) }, 1_500)
+        return
+      }
+      persistWorkflowMessage({ ...transitionCanvasMessage(queued, 'failed', 'system'), deliveryError: target.error })
+      contextDeliveryGate.fail(binding.id, deliverySignature)
       return
     }
-    persistWorkflowMessage({ ...transitionCanvasMessage(queued, 'failed', 'system'), deliveryError: target.error })
-    return
-  }
 
-  const baseline = await readAgentMessageIds(target).catch(() => new Set<string>())
-  const delivering = transitionCanvasMessage(queued, 'delivering', 'system')
-  persistWorkflowMessage(delivering)
-  const delivery = await sendInstruction(target, await hydrateCanvasMessageForDispatch(message))
-  if (!delivery.success) {
-    const failed = { ...transitionCanvasMessage(delivering, 'failed', 'system'), deliveryError: delivery.error }
-    persistWorkflowMessage(failed)
-    if (attempt < 8) {
-      window.setTimeout(() => { void deliverCanvasContextUpdate(binding, content, attempt + 1) }, 1_500)
+    const baseline = await readAgentMessageIds(target).catch(() => new Set<string>())
+    const delivering = transitionCanvasMessage(queued, 'delivering', 'system')
+    persistWorkflowMessage(delivering)
+    const delivery = await sendInstruction(target, await hydrateCanvasMessageForDispatch(message))
+    if (!delivery.success) {
+      const failed = { ...transitionCanvasMessage(delivering, 'failed', 'system'), deliveryError: delivery.error }
+      persistWorkflowMessage(failed)
+      if (attempt < 8) {
+        window.setTimeout(() => { void deliverCanvasContextUpdate(binding, changeToken, attempt + 1) }, 1_500)
+      } else {
+        contextDeliveryGate.fail(binding.id, deliverySignature)
+      }
+      return
     }
-    return
-  }
-  const delivered = {
-    ...transitionCanvasMessage(delivering, 'delivered', 'system'),
-    providerReceipt: delivery.providerReceipt,
-    deliveredAt: delivery.timestamp
-  }
-  persistWorkflowMessage(transitionCanvasMessage(delivered, 'acknowledged', 'system'))
-  try {
-    await dispatchCanvasDelegations(binding.targetAgentNodeId, message.content)
-    const response = await waitForAgentResponse({ target, baselineMessageIds: baseline, timeoutMs: 30_000 })
-    await dispatchCanvasDelegations(binding.targetAgentNodeId, response.content)
-  } catch {
-    // Context delivery remains acknowledged even when the provider is busy or
-    // does not emit a parseable assistant response for this update.
+    const delivered = {
+      ...transitionCanvasMessage(delivering, 'delivered', 'system'),
+      providerReceipt: delivery.providerReceipt,
+      deliveredAt: delivery.timestamp
+    }
+    persistWorkflowMessage(transitionCanvasMessage(delivered, 'acknowledged', 'system'))
+    contextDeliveryGate.complete(binding.id, deliverySignature)
+    try {
+      await dispatchCanvasDelegations(binding.targetAgentNodeId, message.content)
+      const response = await waitForAgentResponse({ target, baselineMessageIds: baseline, timeoutMs: 30_000 })
+      await dispatchCanvasDelegations(binding.targetAgentNodeId, response.content)
+    } catch {
+      // Context delivery remains acknowledged even when the provider is busy or
+      // does not emit a parseable assistant response for this update.
+    }
+  } catch (error) {
+    contextDeliveryGate.fail(binding.id, deliverySignature)
+    throw error
   }
 }
 
@@ -239,11 +254,11 @@ async function deliverCanvasContextUpdate(
  * the user to copy/paste the note or approve a second time. The binding itself
  * is the durable user-created permission boundary. Updates are serialized per
  * target so fast note edits cannot arrive out of order. */
-export function publishCanvasContextUpdate(binding: ContextBinding, content: string): void {
+export function publishCanvasContextUpdate(binding: ContextBinding, changeToken: string): void {
   const previous = contextUpdateQueues.get(binding.targetAgentNodeId) ?? Promise.resolve()
   const next = previous
     .catch(() => undefined)
-    .then(() => deliverCanvasContextUpdate(binding, content))
+    .then(() => deliverCanvasContextUpdate(binding, changeToken))
   contextUpdateQueues.set(binding.targetAgentNodeId, next)
   void next.finally(() => {
     if (contextUpdateQueues.get(binding.targetAgentNodeId) === next) {

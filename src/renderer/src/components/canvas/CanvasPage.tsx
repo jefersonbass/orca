@@ -17,6 +17,7 @@ import { CANVAS_DRAW_TO_ADD_NODE, type CanvasTool } from './canvas-tool-types'
 import { exportCanvasPng, exportCanvasSvg } from './canvas-export'
 import { createOperationalBinding, resolveOperationalRoute } from './canvas-operational-graph'
 import { autoDeliverContextBinding, publishCanvasContextUpdate } from './canvas-orchestration-runtime'
+import { canvasContextSourceSignature } from './canvas-context-signature'
 
 const LEGACY_STORAGE_KEY = 'orca-canvas-document'
 const CANVAS_AGENT_PRESET_COMMANDS: Partial<Record<TuiAgent, string>> = {
@@ -141,16 +142,23 @@ const CanvasPageInner: React.FC = () => {
     const next = new Map<string, string>()
     for (const binding of canvasOrchestration.bindings) {
       if (binding.kind !== 'context' || !binding.enabled) continue
-      const source = storeCanvasDocument.nodes.find((node) => node.id === binding.sourceNodeId)
-      const browserState = source?.type === 'browser-preview' || source?.type === 'browser-session'
-        ? JSON.stringify(browserPagesByWorkspace)
-        : ''
-      const signature = `${binding.sourceNodeId}\0${source ? JSON.stringify(source) : 'missing canvas node'}\0${browserState}`
       const prior = previous.get(binding.id)
+      const source = storeCanvasDocument.nodes.find((node) => node.id === binding.sourceNodeId)
+      // Removing a node also removes its visual edge/binding. Never turn that
+      // short reconciliation window into a costly "Missing Canvas node" prompt.
+      if (!source) {
+        if (prior) next.set(binding.id, prior)
+        continue
+      }
+      const signature = canvasContextSourceSignature(
+        source,
+        storeCanvasDocument.nodes,
+        browserPagesByWorkspace
+      )
       if (!prior) {
         autoDeliverContextBinding(binding)
       } else if (prior !== signature) {
-        publishCanvasContextUpdate(binding, 'The linked Canvas resource changed; refresh its native snapshot at dispatch time.')
+        publishCanvasContextUpdate(binding, signature)
       }
       next.set(binding.id, signature)
     }

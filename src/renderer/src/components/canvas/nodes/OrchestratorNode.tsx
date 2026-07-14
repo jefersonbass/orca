@@ -1,9 +1,10 @@
 import React, { useEffect, useRef } from 'react'
 import type { NodeProps, Node } from '@xyflow/react'
-import { Handle, Position } from '@xyflow/react'
+import { Handle, Position, useStore } from '@xyflow/react'
 import type { CanvasResourceReference } from '../../../../../shared/canvas-types'
 import { CanvasNodeResizer } from '../CanvasNodeResizer'
 import { getCanvasPortalTargets, setCanvasPortalTargets } from '../canvas-terminal-portal'
+import { canvasTerminalPortalStyle } from '../canvas-terminal-portal-geometry'
 
 type OrchestratorNodeType = Node<
   {
@@ -31,6 +32,7 @@ const statusStyles: Record<string, { color: string; bg: string; label: string }>
 export const OrchestratorNode: React.FC<NodeProps<OrchestratorNodeType>> = React.memo(
   ({ data, selected }) => {
     const portalRef = useRef<HTMLDivElement>(null)
+    const zoom = useStore((state) => state.transform[2])
     const terminalRef = data.resourceRef?.kind === 'terminal-tab' ? data.resourceRef : undefined
     const tabId = terminalRef?.tabId
     const worktreeId = terminalRef?.worktreeId ?? ''
@@ -63,8 +65,14 @@ export const OrchestratorNode: React.FC<NodeProps<OrchestratorNodeType>> = React
             <span>{data.taskCount ?? 0} tasks/context</span>
             <span className="ml-auto capitalize">{data.agentStatus ?? 'idle'}</span>
           </div>
-          <div ref={portalRef} className="nodrag nopan nowheel relative flex min-h-0 flex-1 items-center justify-center" onPointerDown={(event) => event.stopPropagation()} data-pane-key={portalKey}>
-            {!tabId && <div className="px-4 text-center text-xs text-worktree-sidebar-foreground/40">No coordinator terminal attached</div>}
+          <div className="nodrag nopan nowheel relative flex min-h-0 flex-1 items-center justify-center" onPointerDown={(event) => event.stopPropagation()}>
+            <div
+              ref={portalRef}
+              className="absolute left-0 top-0 flex min-h-0 items-center justify-center overflow-hidden"
+              style={canvasTerminalPortalStyle(zoom)}
+              data-pane-key={portalKey}
+            />
+            {!tabId && <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-worktree-sidebar-foreground/40">No coordinator terminal attached</div>}
           </div>
         </div>
         <CanvasNodeResizer visible={data.resizeEnabled} minWidth={300} minHeight={180} />
