@@ -68,12 +68,14 @@ describe('runQuickCommandInNewTab', () => {
         appendEnter: true
       },
       worktreeId: 'wt-1',
-      groupId: 'group-1'
+      groupId: 'group-1',
+      startupCwd: 'packages/canvas'
     })
 
     expect(result).toEqual({ tabId: 'tab-new' })
     expect(mockState.createTab).toHaveBeenCalledWith('wt-1', 'group-1', undefined, {
-      quickCommandLabel: 'Build'
+      quickCommandLabel: 'Build',
+      startupCwd: 'packages/canvas'
     })
     expect(mockState.queueTabStartupCommand).toHaveBeenCalledWith('tab-new', {
       command: 'cd packages; bun run build; cd ..'

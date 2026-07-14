@@ -46,14 +46,15 @@ export const BrowserPreviewNode: React.FC<NodeProps<BrowserPreviewNodeType>> = R
         aria-label={`Browser: ${data.url}`}
         tabIndex={0}
       >
-        {!tabId && <div className="flex items-center gap-2 border-b border-worktree-sidebar-border px-3 py-2">
+        <div className="canvas-browser-drag-handle flex h-8 items-center gap-2 border-b border-worktree-sidebar-border px-3 py-1.5">
           <span aria-hidden="true" className="text-[14px]">
             {data.favicon ? <img src={data.favicon} className="size-4" alt="" /> : '🌐'}
           </span>
           <span className="truncate text-[13px] font-medium text-worktree-sidebar-foreground">
             {data.label || hostname}
           </span>
-        </div>}
+          <span className="ml-auto truncate font-mono text-[10px] text-worktree-sidebar-foreground/30">{hostname}</span>
+        </div>
         {!tabId && <div className="space-y-1 px-3 py-2">
           <div className="truncate text-[11px] text-blue-400/70 font-mono">
             {data.url}
@@ -63,7 +64,7 @@ export const BrowserPreviewNode: React.FC<NodeProps<BrowserPreviewNodeType>> = R
             {data.worktreeName && <span className="ml-auto">{data.worktreeName}</span>}
           </div>
         </div>}
-        {tabId && <div ref={targetRef} className="relative flex size-full min-h-0 min-w-0 flex-col overflow-hidden" aria-label="Embedded browser" />}
+        {tabId && <div ref={targetRef} className="nodrag nopan nowheel relative flex h-[calc(100%-32px)] w-full min-h-0 min-w-0 flex-col overflow-hidden" aria-label="Embedded browser" onPointerDown={(event) => event.stopPropagation()} />}
         <CanvasNodeResizer visible={data.resizeEnabled} minWidth={280} minHeight={180} />
         <Handle type="source" position={Position.Bottom} className="!opacity-0" />
         <Handle type="target" position={Position.Top} className="!opacity-0" />

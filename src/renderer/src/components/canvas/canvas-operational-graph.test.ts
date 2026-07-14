@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allowedBindingKinds, createOperationalBinding } from './canvas-operational-graph'
+import { allowedBindingKinds, createOperationalBinding, resolveOperationalRoute } from './canvas-operational-graph'
 
 describe('canvas operational graph', () => {
   it('supports the Maestri-style composable connection matrix', () => {
@@ -15,5 +15,12 @@ describe('canvas operational graph', () => {
   it('creates behavior-bearing bindings separately from semantic edges', () => {
     expect(createOperationalBinding({ kind: 'delegation', sourceNodeId: 'lead', targetNodeId: 'dev' }))
       .toMatchObject({ kind: 'delegation', sourceAgentNodeId: 'lead', targetAgentNodeId: 'dev', requiresUserApproval: true })
+  })
+
+  it('normalizes reverse-drawn context links toward the agent', () => {
+    expect(resolveOperationalRoute(
+      { id: 'agent', type: 'agent-terminal' },
+      { id: 'browser', type: 'browser-preview' }
+    )).toEqual({ kind: 'context', sourceNodeId: 'browser', targetNodeId: 'agent', reversed: true })
   })
 })

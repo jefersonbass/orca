@@ -6,7 +6,7 @@ import { CanvasNodeResizer } from '../CanvasNodeResizer'
 
 type ShapeType = 'label' | 'rectangle' | 'arrow' | 'highlight'
 type ShapeNodeType = Node<
-  { label?: string; color?: string; shapeType: ShapeType; type?: string; width?: number; height?: number; resizeEnabled?: boolean },
+  { label?: string; color?: string; shapeType: ShapeType; type?: string; width?: number; height?: number; fontSize?: number; resizeEnabled?: boolean },
   ShapeType
 >
 
@@ -64,10 +64,11 @@ export const BasicShapeNode: React.FC<NodeProps<ShapeNodeType>> = React.memo(
           return (
             <div
               className="flex size-full items-center justify-center rounded px-3 py-1.5"
+              style={{ fontSize: data.fontSize ?? 16 }}
               role="img"
               aria-label={`Label: ${data.label}`}
             >
-              <span className="select-none text-[13px] font-medium" style={{ color: borderColor }} onDoubleClick={() => setEditing(true)}>
+              <span className="select-none font-medium" style={{ color: borderColor, fontSize: data.fontSize ?? 16 }} onDoubleClick={() => setEditing(true)}>
                 {editableText}
               </span>
             </div>

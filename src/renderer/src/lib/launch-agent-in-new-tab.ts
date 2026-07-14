@@ -51,6 +51,8 @@ export type LaunchAgentInNewTabArgs = {
   /** Shell platform that will execute the startup command. Defaults to the
    * renderer OS; SSH and WSL worktrees run a Linux shell even from Windows. */
   launchPlatform?: NodeJS.Platform
+  /** Optional working directory for the terminal that hosts the agent. */
+  startupCwd?: string
   /** Called after the prompt is actually delivered to the agent input path. */
   onPromptDelivered?: () => void
 }
@@ -95,6 +97,7 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
     launchSource,
     quickCommandLabel,
     launchPlatform,
+    startupCwd,
     onPromptDelivered
   } = args
   const store = useAppStore.getState()
@@ -229,6 +232,7 @@ export function launchAgentInNewTab(args: LaunchAgentInNewTabArgs): LaunchAgentI
   const tab = store.createTab(worktreeId, groupId, undefined, {
     launchAgent: agent,
     quickCommandLabel,
+    ...(startupCwd?.trim() ? { startupCwd: startupCwd.trim() } : {}),
     ...initialAgentTabViewModeProps(store.settings, {
       agent,
       promptDelivery: viewModePromptDelivery,

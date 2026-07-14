@@ -1,4 +1,5 @@
 import type { CanvasDocument, CanvasNodeDocument } from '../../../../shared/canvas-types'
+import { toPng, toSvg } from 'html-to-image'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const PADDING = 40
@@ -54,7 +55,7 @@ function renderNode(node: CanvasNodeDocument, offsetX: number, offsetY: number):
     const stroke = escapeXml(String(metadata.strokeColor ?? color))
     const fill = escapeXml(String(metadata.fillColor ?? 'none'))
     if (drawingType === 'ellipse') return `<ellipse cx="${x + width / 2}" cy="${y + height / 2}" rx="${Math.max(1, width / 2 - 4)}" ry="${Math.max(1, height / 2 - 4)}" fill="${fill}" stroke="${stroke}" stroke-width="2"/>`
-    const points = Array.isArray(metadata.points) ? metadata.points.map((point) => `${x + Number((point as { x?: number }).x ?? 0)},${y + Number((point as { y?: number }).y ?? 0)}`).join(' ') : `${x},${y} ${x + width},${y + height}`
+    const points = Array.isArray(metadata.points) ? metadata.points.map((point) => `${x + (Number((point as { x?: number }).x ?? 0) / 100) * width},${y + (Number((point as { y?: number }).y ?? 0) / 100) * height}`).join(' ') : `${x},${y} ${x + width},${y + height}`
     return drawingType === 'freehand'
       ? `<polyline points="${points}" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`
       : `<polygon points="${points}" fill="${fill}" stroke="${stroke}" stroke-width="2"/>`
@@ -103,12 +104,63 @@ export function downloadBlob(blob: Blob, filename: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export function exportCanvasSvg(doc: CanvasDocument): void {
+function downloadDataUrl(dataUrl: string, filename: string): void {
+  const anchor = document.createElement('a')
+  anchor.href = dataUrl
+  anchor.download = filename
+  anchor.click()
+}
+
+async function captureRenderedCanvas(doc: CanvasDocument, format: 'png' | 'svg'): Promise<string | null> {
+  const viewport = document.querySelector<HTMLElement>('.canvas-flow .react-flow__viewport')
+  if (!viewport || doc.nodes.length === 0) return null
+  const bounds = getBounds(doc)
+  const width = Math.ceil(bounds.width + PADDING * 2)
+  const height = Math.ceil(bounds.height + PADDING * 2)
+  const pixelRatio = format === 'png'
+    ? Math.max(1, Math.min(2, Math.sqrt(16_000_000 / Math.max(1, width * height))))
+    : 1
+  const options = {
+    width,
+    height,
+    pixelRatio,
+    backgroundColor: '#0f172a',
+    cacheBust: true,
+    style: {
+      width: `${width}px`,
+      height: `${height}px`,
+      transform: `translate(${PADDING - bounds.minX}px, ${PADDING - bounds.minY}px)`,
+      transformOrigin: '0 0',
+    },
+  }
+  return format === 'png' ? toPng(viewport, options) : toSvg(viewport, options)
+}
+
+export async function exportCanvasSvg(doc: CanvasDocument): Promise<void> {
+  try {
+    const rendered = await captureRenderedCanvas(doc, 'svg')
+    if (rendered) {
+      downloadDataUrl(rendered, 'orca-canvas.svg')
+      return
+    }
+  } catch {
+    // Fall back to the deterministic document renderer when a live web surface
+    // contains a cross-origin asset that cannot be serialized.
+  }
   const { svg } = renderCanvasSvg(doc)
   downloadBlob(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), 'orca-canvas.svg')
 }
 
-export function exportCanvasPng(doc: CanvasDocument): void {
+export async function exportCanvasPng(doc: CanvasDocument): Promise<void> {
+  try {
+    const rendered = await captureRenderedCanvas(doc, 'png')
+    if (rendered) {
+      downloadDataUrl(rendered, 'orca-canvas.png')
+      return
+    }
+  } catch {
+    // Keep a useful export available even if a browser page blocks capture.
+  }
   const { svg, width, height } = renderCanvasSvg(doc)
   const image = new Image()
   const svgUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }))

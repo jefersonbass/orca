@@ -14,6 +14,7 @@ type AgentTerminalNodeType = Node<
     agentStatus?: 'working' | 'blocked' | 'waiting' | 'done' | 'idle' | 'disconnected'
     sessionId?: string
     color?: string
+    monitorActivity?: boolean
     resizeEnabled?: boolean
   },
   'agent-terminal'
@@ -60,7 +61,7 @@ export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
         : ''
     const portalKey = paneKey ?? (tabId ? `canvas-tab:${tabId}` : undefined)
     const statusColor = statusColors[data.agentStatus ?? 'idle'] ?? statusColors.idle
-    const statusLabel = statusLabels[data.agentStatus ?? 'idle'] ?? 'Unknown'
+    const statusLabel = data.monitorActivity === false ? 'Monitoring off' : statusLabels[data.agentStatus ?? 'idle'] ?? 'Unknown'
 
     const borderColor = data.color ?? (selected ? '#3b82f6' : '#533483')
     const hasColor = !!data.color
@@ -125,6 +126,7 @@ export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
           ref={portalRef}
           className="nodrag nopan nowheel relative flex h-[calc(100%-32px)] w-full min-h-0 items-center justify-center"
           onClick={handleFocus}
+          onPointerDown={(event) => event.stopPropagation()}
           data-pane-key={paneKey}
         >
           {!hasAgent && (

@@ -105,7 +105,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = React.memo(
           label="Create connection"
           shortcut="L"
           active={activeTool === 'link'}
-          onClick={() => onToolChange('link')}
+          onClick={() => onToolChange(activeTool === 'link' ? 'select' : 'link')}
         >
           🔗
         </ToolbarButton>

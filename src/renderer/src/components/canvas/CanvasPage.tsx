@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CanvasToolbar } from './CanvasToolbar'
 import { CanvasEmptyState } from './CanvasEmptyState'
 import { KnowledgeArtifactDialog } from './KnowledgeArtifactDialog'
@@ -10,15 +10,21 @@ import { useAppStore } from '@/store'
 import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
 import { runQuickCommandInNewTab } from '@/lib/run-quick-command-in-new-tab'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
-import type { CanvasEdgeDocument, CanvasResourceReference, CanvasUndoAction } from '../../../../shared/canvas-types'
+import type { CanvasEdgeDocument, CanvasNodeDocument, CanvasResourceReference, CanvasUndoAction } from '../../../../shared/canvas-types'
 import type { TuiAgent } from '../../../../shared/types'
 import type { AddNodeType } from './CanvasToolbar'
 import { CANVAS_DRAW_TO_ADD_NODE, type CanvasTool } from './canvas-tool-types'
 import { exportCanvasPng, exportCanvasSvg } from './canvas-export'
-import { allowedBindingKinds, createOperationalBinding } from './canvas-operational-graph'
+import { createOperationalBinding, resolveOperationalRoute } from './canvas-operational-graph'
 import { autoDeliverContextBinding, publishCanvasContextUpdate } from './canvas-orchestration-runtime'
 
 const LEGACY_STORAGE_KEY = 'orca-canvas-document'
+const CANVAS_AGENT_PRESET_COMMANDS: Partial<Record<TuiAgent, string>> = {
+  claude: 'claude',
+  codex: 'codex',
+  gemini: 'gemini',
+  opencode: 'opencode',
+}
 
 const CanvasSurface = React.lazy(() =>
   import('./CanvasSurface').then((m) => ({ default: m.CanvasSurface }))
@@ -53,11 +59,44 @@ const CanvasPageInner: React.FC = () => {
   const [resizeNodeId, setResizeNodeId] = useState<string | null>(null)
   const [isConnecting, setIsConnecting] = useState(false)
   const [linkStartNodeId, setLinkStartNodeId] = useState<string | null>(null)
+  const [connectionSourceNodeId, setConnectionSourceNodeId] = useState<string | null>(null)
   const [terminalDraft, setTerminalDraft] = useState<{ kind: 'terminal' | 'agent'; rect: { x: number; y: number; width: number; height: number } } | null>(null)
   const [resourceDraft, setResourceDraft] = useState<{ kind: 'file' | 'folder' | 'browser'; rect: { x: number; y: number; width: number; height: number } } | null>(null)
   const contextSignaturesRef = useRef(new Map<string, string>())
   const canvasRuntimeWorktreeId = activeWorktreeId ?? FLOATING_TERMINAL_WORKTREE_ID
   const nodeCount = storeCanvasDocument?.nodes?.length ?? 0
+  const renderedCanvasNodes = useMemo<CanvasNodeDocument[]>(() => {
+    const nodes = storeCanvasDocument?.nodes ?? []
+    return nodes.map((node) => {
+      if (node.type !== 'agent-terminal' && node.type !== 'orchestrator') return node
+      const monitorActivity = node.metadata?.monitorActivity !== false
+      const tabId = node.resourceRef?.kind === 'terminal-tab' || node.resourceRef?.kind === 'agent-pane'
+        ? node.resourceRef.tabId
+        : undefined
+      const liveStatus = monitorActivity && tabId
+        ? Object.values(agentStatusByPaneKey).find((entry) => entry.tabId === tabId)
+        : undefined
+      const connectedNodeIds = new Set((storeCanvasDocument?.edges ?? []).flatMap((edge) => {
+        if (edge.sourceNodeId === node.id) return [edge.targetNodeId]
+        if (edge.targetNodeId === node.id) return [edge.sourceNodeId]
+        return []
+      }))
+      return {
+        ...node,
+        metadata: {
+          ...node.metadata,
+          monitorActivity,
+          agentStatus: liveStatus?.state ?? (monitorActivity ? 'idle' : 'disconnected'),
+          provider: liveStatus?.agentType ?? node.metadata?.provider,
+          ...(node.type === 'orchestrator' ? {
+            status: 'active',
+            agentCount: nodes.filter((candidate) => connectedNodeIds.has(candidate.id) && (candidate.type === 'agent-terminal' || candidate.type === 'live-terminal' || candidate.type === 'agent-summary')).length,
+            taskCount: nodes.filter((candidate) => connectedNodeIds.has(candidate.id) && (candidate.type === 'task' || candidate.type === 'note' || candidate.type === 'sticky-note')).length,
+          } : {}),
+        },
+      }
+    })
+  }, [agentStatusByPaneKey, storeCanvasDocument])
 
   // ── Persistence ──
   useEffect(() => {
@@ -79,15 +118,16 @@ const CanvasPageInner: React.FC = () => {
       const source = storeCanvasDocument.nodes.find((node) => node.id === edge.sourceNodeId)
       const target = storeCanvasDocument.nodes.find((node) => node.id === edge.targetNodeId)
       if (!source || !target) continue
-      const kind = allowedBindingKinds(source.type, target.type)[0]
-      if (!kind) continue
+      const route = resolveOperationalRoute(source, target)
+      if (!route) continue
+      const { kind, sourceNodeId, targetNodeId } = route
       const alreadyBound = orchestration.bindings.some((binding) => {
-        if (binding.kind === 'context') return kind === 'context' && binding.sourceNodeId === source.id && binding.targetAgentNodeId === target.id
-        if (binding.kind === 'output') return kind === 'output' && binding.sourceAgentNodeId === source.id && binding.targetNoteNodeId === target.id
-        return (kind === 'delegation' || kind === 'reporting') && binding.kind === kind && binding.sourceAgentNodeId === source.id && binding.targetAgentNodeId === target.id
+        if (binding.kind === 'context') return kind === 'context' && binding.sourceNodeId === sourceNodeId && binding.targetAgentNodeId === targetNodeId
+        if (binding.kind === 'output') return kind === 'output' && binding.sourceAgentNodeId === sourceNodeId && binding.targetNoteNodeId === targetNodeId
+        return (kind === 'delegation' || kind === 'reporting') && binding.kind === kind && binding.sourceAgentNodeId === sourceNodeId && binding.targetAgentNodeId === targetNodeId
       })
       if (alreadyBound) continue
-      const binding = createOperationalBinding({ kind, sourceNodeId: source.id, targetNodeId: target.id })
+      const binding = createOperationalBinding({ kind, sourceNodeId, targetNodeId })
       addCanvasBinding(binding)
     }
   }, [addCanvasBinding, storeCanvasDocument])
@@ -186,7 +226,17 @@ const CanvasPageInner: React.FC = () => {
           appState.ensureWorktreeRootGroup(canvasRuntimeWorktreeId)
           const requestedAgent = extraMetadata?.agent
           const agent: TuiAgent = typeof requestedAgent === 'string' ? requestedAgent as TuiAgent : 'codex'
-          const result = launchAgentInNewTab({ agent, worktreeId: canvasRuntimeWorktreeId, launchSource: 'canvas' })
+          const command = typeof extraMetadata?.command === 'string' ? extraMetadata.command.trim() : ''
+          const cwd = typeof extraMetadata?.cwd === 'string' ? extraMetadata.cwd.trim() : ''
+          const defaultCommand = CANVAS_AGENT_PRESET_COMMANDS[agent]
+          const result = command && command !== defaultCommand
+            ? runQuickCommandInNewTab({ command: { id: `canvas_${id}`, label: labelOverride ?? 'Canvas agent', action: 'terminal-command', command, appendEnter: true }, worktreeId: canvasRuntimeWorktreeId, startupCwd: cwd })
+            : launchAgentInNewTab({ agent, worktreeId: canvasRuntimeWorktreeId, launchSource: 'canvas', startupCwd: cwd })
+          if (result?.tabId) resourceRef = { kind: 'terminal-tab', tabId: result.tabId, worktreeId: canvasRuntimeWorktreeId }
+        }
+        if (type === 'orchestrator' && !resourceRef) {
+          appState.ensureWorktreeRootGroup(canvasRuntimeWorktreeId)
+          const result = launchAgentInNewTab({ agent: 'codex', worktreeId: canvasRuntimeWorktreeId, launchSource: 'canvas' })
           if (result?.tabId) resourceRef = { kind: 'terminal-tab', tabId: result.tabId, worktreeId: canvasRuntimeWorktreeId }
         }
 
@@ -213,10 +263,15 @@ const CanvasPageInner: React.FC = () => {
           zIndex: doc.nodes.length + 1,
           label: labelOverride ?? (type === 'live-terminal' ? 'Terminal'
             : type === 'agent-terminal' ? 'Agent'
+            : type === 'drawing-freehand' ? ''
             : type.charAt(0).toUpperCase() + type.slice(1).replace('-', ' ').replace('drawing', 'Drawing')),
         }
         if (resourceRef) node.resourceRef = resourceRef
-        if (drawingMetadata || extraMetadata) node.metadata = { ...drawingMetadata, ...extraMetadata }
+        if (drawingMetadata || extraMetadata || type === 'orchestrator') node.metadata = {
+          ...(type === 'orchestrator' ? { status: 'active', monitorActivity: true } : {}),
+          ...drawingMetadata,
+          ...extraMetadata,
+        }
         const store = useAppStore.getState()
         store.pushUndo({ type: 'add-node', node: node as any })
         return { ...doc, nodes: [...doc.nodes, node as any] }
@@ -226,7 +281,7 @@ const CanvasPageInner: React.FC = () => {
     [canvasRuntimeWorktreeId, syncDoc]
   )
 
-  const handleCreateRect = useCallback((tool: CanvasTool, rect: { x: number; y: number; width: number; height: number }) => {
+  const handleCreateRect = useCallback((tool: CanvasTool, rect: { x: number; y: number; width: number; height: number }, metadata?: Record<string, unknown>) => {
     if (tool === 'terminal' || tool === 'agent') {
       setTerminalDraft({ kind: tool, rect })
       setActiveTool('select')
@@ -239,7 +294,7 @@ const CanvasPageInner: React.FC = () => {
     }
     const nodeType = CANVAS_DRAW_TO_ADD_NODE[tool] as AddNodeType | undefined
     if (!nodeType) return
-    handleAddNode(nodeType, { x: rect.x, y: rect.y }, { width: rect.width, height: rect.height })
+    handleAddNode(nodeType, { x: rect.x, y: rect.y }, { width: rect.width, height: rect.height }, metadata)
     setActiveTool('select')
   }, [handleAddNode])
 
@@ -280,11 +335,21 @@ const CanvasPageInner: React.FC = () => {
     let resourceRef: CanvasResourceReference | undefined
     useAppStore.getState().ensureWorktreeRootGroup(canvasRuntimeWorktreeId)
     if (terminalDraft.kind === 'agent') {
-      const result = launchAgentInNewTab({
-        agent: draft.agent ?? 'codex',
-        worktreeId: canvasRuntimeWorktreeId,
-        launchSource: 'canvas',
-      })
+      const agent = draft.agent ?? 'codex'
+      const command = draft.command.trim()
+      const defaultCommand = CANVAS_AGENT_PRESET_COMMANDS[agent]
+      const result = command && command !== defaultCommand
+        ? runQuickCommandInNewTab({
+            command: { id: `canvas_${Date.now()}`, label: draft.name, action: 'terminal-command', command, appendEnter: true },
+            worktreeId: canvasRuntimeWorktreeId,
+            startupCwd: draft.cwd,
+          })
+        : launchAgentInNewTab({
+            agent,
+            worktreeId: canvasRuntimeWorktreeId,
+            launchSource: 'canvas',
+            startupCwd: draft.cwd,
+          })
       if (result?.tabId) {
         resourceRef = { kind: 'terminal-tab', tabId: result.tabId, worktreeId: canvasRuntimeWorktreeId }
       }
@@ -294,6 +359,7 @@ const CanvasPageInner: React.FC = () => {
         ? runQuickCommandInNewTab({
             command: { id: `canvas_${Date.now()}`, label: draft.name, action: 'terminal-command', command, appendEnter: true },
             worktreeId: canvasRuntimeWorktreeId,
+            startupCwd: draft.cwd,
           })
         : null
       const tabId = result?.tabId ?? (() => {
@@ -331,7 +397,29 @@ const CanvasPageInner: React.FC = () => {
   const handleToolChange = useCallback((tool: CanvasTool) => {
     setActiveTool(tool)
     if (tool !== 'select') setResizeNodeId(null)
-    if (tool !== 'link') setLinkStartNodeId(null)
+    if (tool !== 'link') {
+      setLinkStartNodeId(null)
+      setConnectionSourceNodeId(null)
+    }
+  }, [])
+
+  const finishConnectionMode = useCallback(() => {
+    setLinkStartNodeId(null)
+    setConnectionSourceNodeId(null)
+    setIsConnecting(false)
+    setActiveTool('select')
+  }, [])
+
+  const handleCanvasPaneClick = useCallback(() => {
+    setResizeNodeId(null)
+  }, [])
+
+  useEffect(() => {
+    const cancelResize = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setResizeNodeId(null)
+    }
+    window.addEventListener('keydown', cancelResize)
+    return () => window.removeEventListener('keydown', cancelResize)
   }, [])
 
   // ── Context menu state ──
@@ -384,16 +472,17 @@ const CanvasPageInner: React.FC = () => {
       const source = storeCanvasDocument.nodes.find((node) => node.id === edge.sourceNodeId)
       const target = storeCanvasDocument.nodes.find((node) => node.id === edge.targetNodeId)
       if (!source || !target) return
-      const kind = allowedBindingKinds(source.type, target.type)[0]
-      if (!kind) return
+      const route = resolveOperationalRoute(source, target)
+      if (!route) return
+      const { kind, sourceNodeId, targetNodeId } = route
       const orchestration = useAppStore.getState().canvasOrchestration
       const alreadyBound = orchestration.bindings.some((binding) => {
-        if (binding.kind === 'context') return kind === 'context' && binding.sourceNodeId === source.id && binding.targetAgentNodeId === target.id
-        if (binding.kind === 'output') return kind === 'output' && binding.sourceAgentNodeId === source.id && binding.targetNoteNodeId === target.id
-        return (kind === 'delegation' || kind === 'reporting') && binding.kind === kind && binding.sourceAgentNodeId === source.id && binding.targetAgentNodeId === target.id
+        if (binding.kind === 'context') return kind === 'context' && binding.sourceNodeId === sourceNodeId && binding.targetAgentNodeId === targetNodeId
+        if (binding.kind === 'output') return kind === 'output' && binding.sourceAgentNodeId === sourceNodeId && binding.targetNoteNodeId === targetNodeId
+        return (kind === 'delegation' || kind === 'reporting') && binding.kind === kind && binding.sourceAgentNodeId === sourceNodeId && binding.targetAgentNodeId === targetNodeId
       })
       if (alreadyBound) return
-      const binding = createOperationalBinding({ kind, sourceNodeId: source.id, targetNodeId: target.id })
+      const binding = createOperationalBinding({ kind, sourceNodeId, targetNodeId })
       addCanvasBinding(binding)
     },
     [addCanvasBinding, setCanvasDocument, storeCanvasDocument]
@@ -481,7 +570,12 @@ const CanvasPageInner: React.FC = () => {
     connectedEdges.forEach((e) => store.pushUndo({ type: 'remove-edge', edge: e }))
     setCanvasDocument({
       ...storeCanvasDocument,
-      nodes: storeCanvasDocument.nodes.filter((n) => n.id !== nodeId),
+      nodes: storeCanvasDocument.nodes.filter((n) => n.id !== nodeId).map((node) => {
+        if (node.groupId !== nodeId) return node
+        const ungrouped = { ...node }
+        delete ungrouped.groupId
+        return ungrouped
+      }),
       edges: edges.filter((e) => e.sourceNodeId !== nodeId && e.targetNodeId !== nodeId),
     })
     setSelectedNodeIds((ids) => ids.filter((id) => id !== nodeId))
@@ -530,6 +624,38 @@ const CanvasPageInner: React.FC = () => {
     [nodeCtx, storeCanvasDocument, setCanvasDocument]
   )
 
+  const handleNodeFontSize = useCallback((fontSize: number) => {
+    if (!nodeCtx || !storeCanvasDocument) return
+    const node = storeCanvasDocument.nodes.find((candidate) => candidate.id === nodeCtx.nodeId)
+    if (!node || node.type !== 'label') return
+    const metadata = { ...node.metadata, fontSize }
+    useAppStore.getState().pushUndo({
+      type: 'edit-node',
+      nodeId: node.id,
+      from: { metadata: node.metadata },
+      to: { metadata },
+    })
+    setCanvasDocument({
+      ...storeCanvasDocument,
+      nodes: storeCanvasDocument.nodes.map((candidate) => candidate.id === node.id ? { ...candidate, metadata } : candidate),
+    })
+    setNodeCtx(null)
+  }, [nodeCtx, setCanvasDocument, storeCanvasDocument])
+
+  const handleRemoveFromFrame = useCallback(() => {
+    if (!nodeCtx || !storeCanvasDocument) return
+    setCanvasDocument({
+      ...storeCanvasDocument,
+      nodes: storeCanvasDocument.nodes.map((node) => {
+        if (node.id !== nodeCtx.nodeId || !node.groupId) return node
+        const ungrouped = { ...node }
+        delete ungrouped.groupId
+        return ungrouped
+      }),
+    })
+    setNodeCtx(null)
+  }, [nodeCtx, setCanvasDocument, storeCanvasDocument])
+
   // ── Context menu lifecycle ──
   useEffect(() => {
     if (!nodeCtx && !edgeCtx) return
@@ -551,11 +677,11 @@ const CanvasPageInner: React.FC = () => {
 
   // ── Export ──
   const handleExportSvg = useCallback(() => {
-    if (storeCanvasDocument) exportCanvasSvg(storeCanvasDocument)
+    if (storeCanvasDocument) void exportCanvasSvg(storeCanvasDocument)
   }, [storeCanvasDocument])
 
   const handleExportPng = useCallback(() => {
-    if (storeCanvasDocument) exportCanvasPng(storeCanvasDocument)
+    if (storeCanvasDocument) void exportCanvasPng(storeCanvasDocument)
   }, [storeCanvasDocument])
 
   const hasNodes = (storeCanvasDocument?.nodes?.length ?? 0) > 0
@@ -584,7 +710,7 @@ const CanvasPageInner: React.FC = () => {
         onToolChange={handleToolChange}
       />
       {selectedNodeIds.length > 0 && (
-        <div className="absolute left-1/2 top-10 z-30 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-blue-400/30 bg-worktree-sidebar/95 px-1.5 py-1 shadow-xl backdrop-blur" role="toolbar" aria-label="Selected node actions" onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="absolute left-1/2 top-10 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-blue-400/30 bg-worktree-sidebar/95 px-1.5 py-1 shadow-xl backdrop-blur" role="toolbar" aria-label="Selected node actions" onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
           <button type="button" onClick={handleEditSelectedNode} className="rounded px-2 py-1 text-[11px] text-worktree-sidebar-foreground/70 hover:bg-worktree-sidebar-foreground/10" aria-label="Edit selected node">✎ Edit</button>
           <button type="button" onClick={() => { setLinkStartNodeId(selectedNodeIds[0]); handleToolChange('link') }} className="rounded px-2 py-1 text-[11px] text-blue-300 hover:bg-blue-500/15" aria-label="Link selected node">🔗 Link</button>
           <button type="button" onClick={handleRefreshSelectedNode} className="rounded px-2 py-1 text-[11px] text-worktree-sidebar-foreground/70 hover:bg-worktree-sidebar-foreground/10" aria-label="Refresh selected node">↻ Refresh</button>
@@ -601,6 +727,21 @@ const CanvasPageInner: React.FC = () => {
           aria-label="Node context menu"
         >
           <ColorSubmenu onColor={(c) => { handleNodeColor(c); setNodeCtx(null) }} />
+
+          {storeCanvasDocument?.nodes.find((node) => node.id === nodeCtx.nodeId)?.type === 'label' && (
+            <div className="border-t border-worktree-sidebar-border px-3 py-2">
+              <div className="mb-1.5 text-[10px] uppercase tracking-wider text-worktree-sidebar-foreground/40">Font size</div>
+              <div className="flex gap-1">
+                {[12, 16, 20, 24, 32].map((fontSize) => (
+                  <button key={fontSize} type="button" onClick={() => handleNodeFontSize(fontSize)} className="rounded border border-worktree-sidebar-border px-1.5 py-1 text-[11px] text-worktree-sidebar-foreground/70 hover:border-blue-400 hover:text-blue-300" aria-label={`Font size ${fontSize}`}>{fontSize}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {storeCanvasDocument?.nodes.find((node) => node.id === nodeCtx.nodeId)?.groupId && (
+            <button type="button" onClick={handleRemoveFromFrame} className="flex w-full items-center px-3 py-1.5 text-left text-[13px] text-worktree-sidebar-foreground/70 hover:bg-worktree-sidebar-foreground/5" role="menuitem">Remove from Frame</button>
+          )}
 
           {/* Attach live agent section */}
           {storeCanvasDocument?.nodes.find((node) => node.id === nodeCtx.nodeId)?.type === 'agent-terminal' && (
@@ -713,13 +854,16 @@ const CanvasPageInner: React.FC = () => {
           }
         >
           <CanvasSurface
-            nodes={storeCanvasDocument?.nodes ?? []}
+            nodes={renderedCanvasNodes}
             edges={storeCanvasDocument?.edges ?? []}
             activeTool={activeTool}
             onCreateRect={handleCreateRect}
             onNodeDroppedOnFrame={handleNodeDroppedOnFrame}
             onSelectionChange={setSelectedNodeIds}
             onConnectingChange={setIsConnecting}
+            onConnectionSourceChange={setConnectionSourceNodeId}
+            onConnectionFinished={finishConnectionMode}
+            onPaneClick={handleCanvasPaneClick}
             resizeNodeId={resizeNodeId}
             linkStartNodeId={linkStartNodeId}
             onViewportChange={handleViewportChange}
@@ -731,8 +875,13 @@ const CanvasPageInner: React.FC = () => {
           />
         </React.Suspense>
         {isConnecting && (
-          <div className="pointer-events-none absolute left-1/2 top-[76px] z-30 -translate-x-1/2 rounded-full border border-blue-400/40 bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-300 shadow-lg backdrop-blur">
-            Connecting… drag or click a target handle
+          <div className="absolute left-1/2 top-[76px] z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-blue-400/40 bg-worktree-sidebar/95 px-3 py-1 text-xs font-medium text-blue-300 shadow-lg backdrop-blur">
+            <span>
+              {connectionSourceNodeId
+                ? `Connecting from: ${storeCanvasDocument?.nodes.find((node) => node.id === connectionSourceNodeId)?.label ?? connectionSourceNodeId}`
+                : 'Select the connection source'}
+            </span>
+            <button type="button" onClick={finishConnectionMode} className="rounded px-1 text-blue-200/70 hover:bg-blue-400/15 hover:text-blue-100" aria-label="Cancel connection">×</button>
           </div>
         )}
         {!hasNodes && (

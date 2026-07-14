@@ -27,6 +27,18 @@ export function allowedBindingKinds(source: CanvasNodeType, target: CanvasNodeTy
   return []
 }
 
+/** Resolve executable direction independently from the visual drag direction. */
+export function resolveOperationalRoute(
+  source: { id: string; type: CanvasNodeType },
+  target: { id: string; type: CanvasNodeType }
+): { kind: BindingKind; sourceNodeId: string; targetNodeId: string; reversed: boolean } | null {
+  const direct = allowedBindingKinds(source.type, target.type)[0]
+  if (direct) return { kind: direct, sourceNodeId: source.id, targetNodeId: target.id, reversed: false }
+  const reverse = allowedBindingKinds(target.type, source.type)[0]
+  if (reverse !== 'context') return null
+  return { kind: reverse, sourceNodeId: target.id, targetNodeId: source.id, reversed: true }
+}
+
 export function createOperationalBinding(args: {
   kind: BindingKind
   sourceNodeId: string

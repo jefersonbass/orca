@@ -14,6 +14,8 @@ export type RunQuickCommandInNewTabArgs = {
   /** Tab group the user clicked from. Keeps the spawned terminal in the
    *  pane the user initiated from when available. */
   groupId?: string | null
+  /** Optional working directory for the terminal that runs the command. */
+  startupCwd?: string
 }
 
 function resolveQuickCommandGroupId(
@@ -47,7 +49,8 @@ function resolveQuickCommandGroupId(
 export function runQuickCommandInNewTab({
   command,
   worktreeId,
-  groupId
+  groupId,
+  startupCwd
 }: RunQuickCommandInNewTabArgs): { tabId: string } | null {
   const targetGroupId = groupId ?? undefined
   if (isTerminalAgentQuickCommand(command)) {
@@ -60,7 +63,8 @@ export function runQuickCommandInNewTab({
       worktreeId,
       groupId: targetGroupId,
       launchSource: 'quick_command',
-      quickCommandLabel: command.label
+      quickCommandLabel: command.label,
+      startupCwd,
     })
     if (result?.tabId) {
       const launchedGroupId = resolveQuickCommandGroupId(worktreeId, result.tabId, groupId)
@@ -82,7 +86,8 @@ export function runQuickCommandInNewTab({
   }
   const store = useAppStore.getState()
   const tab = store.createTab(worktreeId, targetGroupId, undefined, {
-    quickCommandLabel: command.label
+    quickCommandLabel: command.label,
+    ...(startupCwd?.trim() ? { startupCwd: startupCwd.trim() } : {}),
   })
 
   store.queueTabStartupCommand(tab.id, {

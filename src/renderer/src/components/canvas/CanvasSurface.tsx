@@ -118,6 +118,17 @@ function rectsOverlap(a: CanvasRect, b: CanvasRect): boolean {
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 }
 
+function nearestNodeAnchor(node: CanvasNodeDocument, point: { x: number; y: number }): { x: number; y: number } {
+  const centerX = node.position.x + node.size.width / 2
+  const centerY = node.position.y + node.size.height / 2
+  const normalizedX = (point.x - centerX) / Math.max(1, node.size.width / 2)
+  const normalizedY = (point.y - centerY) / Math.max(1, node.size.height / 2)
+  if (Math.abs(normalizedX) >= Math.abs(normalizedY)) {
+    return { x: normalizedX >= 0 ? node.position.x + node.size.width : node.position.x, y: centerY }
+  }
+  return { x: centerX, y: normalizedY >= 0 ? node.position.y + node.size.height : node.position.y }
+}
+
 function resolveDraggedNodePositions(nodes: Node[], draggedIds: Set<string>): Map<string, { x: number; y: number }> {
   const positions = new Map(nodes.map((node) => [node.id, { ...node.position }]))
   const dragged = nodes.filter((node) => draggedIds.has(node.id))
@@ -221,8 +232,11 @@ export type CanvasSurfaceProps = {
   onSelectionChange?: (nodeIds: string[]) => void
   linkStartNodeId?: string | null
   activeTool?: CanvasTool
-  onCreateRect?: (tool: CanvasTool, rect: { x: number; y: number; width: number; height: number }) => void
+  onCreateRect?: (tool: CanvasTool, rect: { x: number; y: number; width: number; height: number }, metadata?: Record<string, unknown>) => void
   onConnectingChange?: (connecting: boolean) => void
+  onConnectionSourceChange?: (nodeId: string | null) => void
+  onConnectionFinished?: () => void
+  onPaneClick?: () => void
   resizeNodeId?: string | null
 }
 
@@ -242,23 +256,35 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   activeTool = 'select',
   onCreateRect,
   onConnectingChange,
+  onConnectionSourceChange,
+  onConnectionFinished,
+  onPaneClick,
   resizeNodeId,
 }) => {
   const [connecting, setConnecting] = useState(false)
   const [drawing, setDrawing] = useState<{ x: number; y: number } | null>(null)
   const [draftRect, setDraftRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
+  const [draftPoints, setDraftPoints] = useState<Array<{ x: number; y: number }>>([])
   const [linkPointer, setLinkPointer] = useState<{ x: number; y: number } | null>(null)
+  const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null)
+  const [connectionTargetId, setConnectionTargetId] = useState<string | null>(null)
   const reactFlowInstanceRef = useRef<any>(null)
-  const pendingClickSourceRef = useRef<string | null>(null)
+  const connectionSourceRef = useRef<string | null>(null)
+  const linkPointerRef = useRef<{ x: number; y: number } | null>(null)
   const selectedNodeIdsRef = useRef<Set<string>>(new Set())
   const drawingRef = useRef<{ x: number; y: number } | null>(null)
   const draftRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
+  const draftPointsRef = useRef<Array<{ x: number; y: number }>>([])
   const [isDark, setIsDark] = useState(true)
   const onEdgeCreatedRef = useRef(onEdgeCreated)
 
   useEffect(() => {
     onConnectingChange?.(connecting)
   }, [connecting, onConnectingChange])
+
+  useEffect(() => {
+    onConnectionSourceChange?.(connectionSourceId)
+  }, [connectionSourceId, onConnectionSourceChange])
 
   useEffect(() => {
     onEdgeCreatedRef.current = onEdgeCreated
@@ -326,14 +352,26 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     let next = applyNodeChanges(changes, flowNodesRef.current)
     const document = useAppStore.getState().canvasDocument
     const hasGeometryChange = changes.some((change) => change.type === 'position' || change.type === 'dimensions')
+    const gestureInProgress = changes.some((change) =>
+      (change.type === 'position' && change.dragging === true)
+      || (change.type === 'dimensions' && change.resizing === true)
+    )
+    const dimensionsByNodeId = new Map<string, { width: number; height: number }>(
+      changes.flatMap((change) =>
+        change.type === 'dimensions' && change.dimensions
+          ? [[change.id, change.dimensions] as const]
+          : []
+      )
+    )
 
     if (document && hasGeometryChange) {
       const groupDeltas = new Map<string, { dx: number; dy: number }>()
       for (const change of changes) {
         if (change.type !== 'position') continue
-        const before = document.nodes.find((node) => node.id === change.id)
+        const before = flowNodesRef.current.find((node) => node.id === change.id)
+        const documentNode = document.nodes.find((node) => node.id === change.id)
         const after = next.find((node) => node.id === change.id)
-        if (!before || before.type !== 'group' || !after) continue
+        if (!before || documentNode?.type !== 'group' || !after) continue
         groupDeltas.set(change.id, { dx: after.position.x - before.position.x, dy: after.position.y - before.position.y })
       }
       if (groupDeltas.size > 0) {
@@ -349,18 +387,20 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     flowNodesRef.current = next
     setFlowNodes(next)
 
-    if (document && hasGeometryChange) {
+    if (document && hasGeometryChange && !gestureInProgress) {
       useAppStore.getState().setCanvasDocument({
         ...document,
         nodes: document.nodes.map((node) => {
           const flowNode = next.find((candidate) => candidate.id === node.id)
           if (!flowNode) return node
-          const measured = flowNode.measured
+          const changedDimensions = dimensionsByNodeId.get(node.id)
+          const width = changedDimensions?.width ?? flowNode.width ?? flowNode.measured?.width
+          const height = changedDimensions?.height ?? flowNode.height ?? flowNode.measured?.height
           return {
             ...node,
             position: flowNode.position,
-            size: measured?.width && measured?.height
-              ? { width: measured.width, height: measured.height }
+            size: width && height
+              ? { width, height }
               : node.size
           }
         })
@@ -382,7 +422,7 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
       reactFlowInstanceRef.current = instance
       onReactFlowReady(instance)
       onInit({
-        fitView: () => instance.fitView(),
+        fitView: () => instance.fitView({ maxZoom: 1 }),
         zoomIn: () => instance.zoomIn(),
         zoomOut: () => instance.zoomOut(),
         zoomTo: (zoom: number) => instance.zoomTo(zoom),
@@ -392,18 +432,38 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   )
 
   const snap = useCallback((value: number) => Math.round(value / 20) * 20, [])
-  const toCanvasPoint = useCallback((event: any) => {
+  const toCanvasPoint = useCallback((event: any, snapToGrid = true) => {
     const instance = reactFlowInstanceRef.current
     if (instance?.screenToFlowPosition) {
       const point = instance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
-      return { x: snap(point.x), y: snap(point.y) }
+      return snapToGrid ? { x: snap(point.x), y: snap(point.y) } : point
     }
     const viewport = instance?.getViewport?.() ?? { x: 0, y: 0, zoom: 1 }
-    return {
-      x: snap((event.clientX - viewport.x) / viewport.zoom),
-      y: snap((event.clientY - viewport.y) / viewport.zoom),
+    const point = {
+      x: (event.clientX - viewport.x) / viewport.zoom,
+      y: (event.clientY - viewport.y) / viewport.zoom,
     }
+    return snapToGrid ? { x: snap(point.x), y: snap(point.y) } : point
   }, [snap])
+
+  const scheduleLinkPointer = useCallback((point: { x: number; y: number }) => {
+    linkPointerRef.current = point
+    // Pointer movement must remain observable even when Chromium throttles
+    // animation frames (for example while an embedded terminal has focus).
+    // This update is event-driven, so it cannot create a render loop.
+    setLinkPointer(point)
+  }, [])
+
+  useEffect(() => {
+    if (activeTool !== 'link') return
+    const trackPointer = (event: PointerEvent | MouseEvent) => scheduleLinkPointer(toCanvasPoint(event, false))
+    window.addEventListener('pointermove', trackPointer, true)
+    window.addEventListener('mousemove', trackPointer, true)
+    return () => {
+      window.removeEventListener('pointermove', trackPointer, true)
+      window.removeEventListener('mousemove', trackPointer, true)
+    }
+  }, [activeTool, scheduleLinkPointer, toCanvasPoint])
 
   const updateDraftRect = useCallback((start: { x: number; y: number }, current: { x: number; y: number }) => {
     const nextRect = {
@@ -416,18 +476,36 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     setDraftRect(nextRect)
   }, [])
 
-  const onPaneMouseMove = useCallback((event: any) => {
-    const point = toCanvasPoint(event)
-    if (activeTool === 'link') setLinkPointer(point)
-  }, [activeTool, toCanvasPoint])
-
   const finishDrawing = useCallback(() => {
     const completedRect = draftRectRef.current
     if (!drawingRef.current || !completedRect) return
+    const completedPoints = draftPointsRef.current
     drawingRef.current = null
     draftRectRef.current = null
+    draftPointsRef.current = []
     setDrawing(null)
     setDraftRect(null)
+    setDraftPoints([])
+    if (activeTool === 'freehand' && completedPoints.length >= 2) {
+      const padding = 4
+      const minX = Math.min(...completedPoints.map((point) => point.x))
+      const minY = Math.min(...completedPoints.map((point) => point.y))
+      const maxX = Math.max(...completedPoints.map((point) => point.x))
+      const maxY = Math.max(...completedPoints.map((point) => point.y))
+      const rect = {
+        x: minX - padding,
+        y: minY - padding,
+        width: Math.max(40, maxX - minX + padding * 2),
+        height: Math.max(40, maxY - minY + padding * 2),
+      }
+      onCreateRect?.(activeTool, rect, {
+        points: completedPoints.map((point) => ({
+          x: ((point.x - rect.x) / rect.width) * 100,
+          y: ((point.y - rect.y) / rect.height) * 100,
+        })),
+      })
+      return
+    }
     if (completedRect.width < 40 || completedRect.height < 40) return
     onCreateRect?.(activeTool, completedRect)
   }, [activeTool, onCreateRect])
@@ -435,11 +513,13 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   const onCanvasPointerDownCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (activeTool === 'select' || activeTool === 'link' || event.button !== 0) return
     const target = event.target as Element | null
-    if (!target?.closest('.react-flow__pane') || target.closest('.react-flow__node') || target.closest('.react-flow__minimap')) return
-    const start = toCanvasPoint(event)
+    if (!target?.closest('.react-flow') || target.closest('.react-flow__node') || target.closest('.react-flow__minimap') || target.closest('.react-flow__controls')) return
+    const start = toCanvasPoint(event, activeTool !== 'freehand')
     drawingRef.current = start
+    draftPointsRef.current = activeTool === 'freehand' ? [start] : []
     draftRectRef.current = { x: start.x, y: start.y, width: 0, height: 0 }
     setDrawing(start)
+    setDraftPoints(draftPointsRef.current)
     setDraftRect(draftRectRef.current)
     event.currentTarget.setPointerCapture?.(event.pointerId)
     event.preventDefault()
@@ -447,13 +527,25 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
   }, [activeTool, toCanvasPoint])
 
   const onCanvasPointerMoveCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (activeTool === 'link') setLinkPointer(toCanvasPoint(event))
+    if (activeTool === 'link') scheduleLinkPointer(toCanvasPoint(event, false))
     const start = drawingRef.current
     if (!start) return
+    if (activeTool === 'freehand') {
+      const current = toCanvasPoint(event, false)
+      const previous = draftPointsRef.current[draftPointsRef.current.length - 1]
+      if (!previous || Math.hypot(current.x - previous.x, current.y - previous.y) >= 2) {
+        draftPointsRef.current = [...draftPointsRef.current, current]
+        setDraftPoints(draftPointsRef.current)
+      }
+      updateDraftRect(start, current)
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
     updateDraftRect(start, toCanvasPoint(event))
     event.preventDefault()
     event.stopPropagation()
-  }, [activeTool, toCanvasPoint, updateDraftRect])
+  }, [activeTool, scheduleLinkPointer, toCanvasPoint, updateDraftRect])
 
   const onCanvasPointerUpCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!drawingRef.current) return
@@ -470,6 +562,12 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     const currentNodes = flowNodesRef.current
     const draggedIds = new Set(currentNodes.filter((candidate) => candidate.selected).map((candidate) => candidate.id))
     draggedIds.add(node.id)
+    for (const draggedId of [...draggedIds]) {
+      if (canvasDocumentNodes.find((candidate) => candidate.id === draggedId)?.type !== 'group') continue
+      for (const child of canvasDocumentNodes.filter((candidate) => candidate.groupId === draggedId)) {
+        draggedIds.add(child.id)
+      }
+    }
     const correctedPositions = resolveDraggedNodePositions(currentNodes, draggedIds)
     const correctedNodes = currentNodes.map((candidate) => {
       const position = correctedPositions.get(candidate.id)
@@ -509,41 +607,64 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     }
   }, [canvasDocumentNodes, onNodeDroppedOnFrame, setFlowNodes])
 
+  const setConnectionSource = useCallback((nodeId: string | null) => {
+    if (connectionSourceRef.current === nodeId) return
+    connectionSourceRef.current = nodeId
+    setConnectionSourceId(nodeId)
+    setConnecting(nodeId !== null)
+    setConnectionTargetId(null)
+    if (!nodeId) {
+      linkPointerRef.current = null
+      setLinkPointer(null)
+      return
+    }
+    const source = canvasDocumentNodes.find((node) => node.id === nodeId)
+    if (!source) return
+    const center = {
+      x: source.position.x + source.size.width / 2,
+      y: source.position.y + source.size.height / 2,
+    }
+    linkPointerRef.current = center
+    setLinkPointer(center)
+  }, [canvasDocumentNodes])
+
+  const cancelConnection = useCallback((notifyParent = true) => {
+    setConnectionSource(null)
+    if (notifyParent) onConnectionFinished?.()
+  }, [onConnectionFinished, setConnectionSource])
+
   useEffect(() => {
-    if (!drawing) return
-    const cancelDrawing = (event: KeyboardEvent) => {
+    if (!drawing && activeTool !== 'link') return
+    const cancelTransientGesture = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       drawingRef.current = null
       draftRectRef.current = null
+      draftPointsRef.current = []
       setDrawing(null)
       setDraftRect(null)
+      setDraftPoints([])
+      if (activeTool === 'link') cancelConnection()
     }
-    window.addEventListener('keydown', cancelDrawing)
-    return () => window.removeEventListener('keydown', cancelDrawing)
-  }, [drawing])
+    window.addEventListener('keydown', cancelTransientGesture)
+    return () => window.removeEventListener('keydown', cancelTransientGesture)
+  }, [activeTool, cancelConnection, drawing])
 
   useEffect(() => {
-    if (!linkStartNodeId) return
-    pendingClickSourceRef.current = linkStartNodeId
-    setConnecting(true)
-    const source = canvasDocumentNodes.find((node) => node.id === linkStartNodeId)
-    if (source) {
-      setLinkPointer({
-        x: source.position.x + source.size.width / 2,
-        y: source.position.y + source.size.height / 2,
-      })
-    }
-  }, [canvasDocumentNodes, linkStartNodeId])
+    if (!linkStartNodeId || activeTool !== 'link') return
+    setConnectionSource(linkStartNodeId)
+  }, [activeTool, linkStartNodeId, setConnectionSource])
 
   useEffect(() => {
-    if (activeTool === 'link') return
-    pendingClickSourceRef.current = null
-    setConnecting(false)
-    setLinkPointer(null)
-  }, [activeTool])
+    if (activeTool === 'link') {
+      setConnecting(true)
+      return
+    }
+    setConnectionSource(null)
+  }, [activeTool, setConnectionSource])
 
   const createEdge = useCallback((source: string, target: string) => {
     if (!source || !target || source === target) return
+    if (canvasEdges.some((edge) => edge.sourceNodeId === source && edge.targetNodeId === target)) return
     const now = new Date().toISOString()
     const edgeId = `edge_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
     setFlowEdges((edges) => addEdge({
@@ -560,48 +681,32 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
       relationship: 'depends-on',
       type: 'depends-on',
     })
-  }, [setFlowEdges])
+  }, [canvasEdges, setFlowEdges])
 
   const handleConnect = useCallback((connection: any) => {
-    setConnecting(false)
     if (!connection.source || !connection.target) return
     createEdge(connection.source, connection.target)
-  }, [createEdge])
+    cancelConnection()
+  }, [cancelConnection, createEdge])
 
   const handleConnectStart = useCallback(() => setConnecting(true), [])
   const handleConnectEnd = useCallback(() => {
-    if (!pendingClickSourceRef.current) setConnecting(false)
+    if (!connectionSourceRef.current) setConnecting(false)
   }, [])
 
-  useEffect(() => {
-    const applyClickConnection = (detail: { nodeId: string; handleType: 'source' | 'target' }) => {
-      if (detail.handleType === 'source') {
-        pendingClickSourceRef.current = detail.nodeId
-        setConnecting(true)
-        return
-      }
-      const source = pendingClickSourceRef.current
-      if (!source) return
-      createEdge(source, detail.nodeId)
-      pendingClickSourceRef.current = null
-      setConnecting(false)
+  const handleConnectionNodeClick = useCallback((nodeId: string) => {
+    const source = connectionSourceRef.current
+    if (!source) {
+      setConnectionSource(nodeId)
+      return
     }
-    const handleClickConnection = (event: Event) => {
-      applyClickConnection((event as CustomEvent<{ nodeId: string; handleType: 'source' | 'target' }>).detail)
+    if (source === nodeId) {
+      cancelConnection()
+      return
     }
-    const handleNativeHandleClick = (event: MouseEvent) => {
-      const handle = (event.target as HTMLElement | null)?.closest<HTMLElement>('.react-flow__handle')
-      const nodeId = handle?.dataset.nodeid
-      if (!handle || !nodeId) return
-      applyClickConnection({ nodeId, handleType: handle.classList.contains('source') ? 'source' : 'target' })
-    }
-    window.addEventListener('orca:canvas-handle-click', handleClickConnection)
-    document.addEventListener('click', handleNativeHandleClick, true)
-    return () => {
-      window.removeEventListener('orca:canvas-handle-click', handleClickConnection)
-      document.removeEventListener('click', handleNativeHandleClick, true)
-    }
-  }, [createEdge])
+    createEdge(source, nodeId)
+    cancelConnection()
+  }, [cancelConnection, createEdge, setConnectionSource])
 
   // Grid color based on theme
   const gridColor = isDark ? 'rgba(148, 163, 184, 0.08)' : 'rgba(0, 0, 0, 0.06)'
@@ -612,23 +717,11 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     onSelectionChange?.(ids)
   }, [onSelectionChange])
 
-  const handleNodeClick = useCallback((_event: any, node: any) => {
-    if (activeTool !== 'link') {
-      selectedNodeIdsRef.current = new Set([node.id])
-      onSelectionChange?.([node.id])
-      return
-    }
-    const source = pendingClickSourceRef.current
-    if (!source) {
-      pendingClickSourceRef.current = node.id
-      setConnecting(true)
-      return
-    }
-    createEdge(source, node.id)
-    pendingClickSourceRef.current = null
-    setConnecting(false)
-    setLinkPointer(null)
-  }, [activeTool, createEdge, onSelectionChange])
+  const handleNodeClick = useCallback((event: any) => {
+    // React Flow owns selection. Connection clicks are captured by the
+    // full-node overlays rendered below, including browser/terminal portals.
+    if (activeTool === 'link') event.preventDefault?.()
+  }, [activeTool])
 
   const flowProps: Record<string, unknown> = {
     nodes: flowNodes,
@@ -640,6 +733,7 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     nodeTypes,
     edgeTypes,
     fitView: true,
+    fitViewOptions: { maxZoom: 1 },
     minZoom: 0.1,
     maxZoom: 5,
     snapToGrid: true,
@@ -659,6 +753,16 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     },
     onSelectionChange: handleSelectionChange,
     onNodeClick: handleNodeClick,
+    onPointerMove: (event: React.PointerEvent) => {
+      if (activeTool === 'link') scheduleLinkPointer(toCanvasPoint(event, false))
+    },
+    onMouseMove: (event: React.MouseEvent) => {
+      if (activeTool === 'link') scheduleLinkPointer(toCanvasPoint(event, false))
+    },
+    onPaneClick: () => {
+      if (activeTool === 'link') cancelConnection()
+      onPaneClick?.()
+    },
     onEdgeContextMenu: (event: any, edge: any) => {
       event.preventDefault()
       onEdgeContextMenu?.({ edgeId: edge.id, x: event.clientX, y: event.clientY })
@@ -675,7 +779,6 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
     // remains available for panning, which keeps the pointer tool useful for
     // both selection and navigation.
     panOnDrag: activeTool === 'select' ? [1, 2] : false,
-    onPaneMouseMove,
     onNodeDragStop,
   }
   return (
@@ -684,6 +787,9 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
       style={{ background: isDark ? '#1a1a2e' : '#f5f5f5' }}
       onPointerDownCapture={onCanvasPointerDownCapture}
       onPointerMoveCapture={onCanvasPointerMoveCapture}
+      onMouseMoveCapture={(event) => {
+        if (activeTool === 'link') scheduleLinkPointer(toCanvasPoint(event, false))
+      }}
       onPointerUpCapture={onCanvasPointerUpCapture}
       onPointerCancel={onCanvasPointerUpCapture}
     >
@@ -695,7 +801,7 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
           color: gridColor,
         }),
         React.createElement(CanvasEdgeOverlay, { nodes: canvasDocumentNodes, edges: canvasEdges }),
-        draftRect && React.createElement(ViewportPortal, null,
+        draftRect && activeTool !== 'freehand' && React.createElement(ViewportPortal, null,
           React.createElement('div', {
             className: 'pointer-events-none absolute rounded-md border-2 border-blue-400 bg-blue-400/10 shadow-[0_0_0_1px_rgba(96,165,250,0.2)]',
             style: { left: draftRect.x, top: draftRect.y, width: draftRect.width, height: draftRect.height },
@@ -704,16 +810,34 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
           React.createElement('span', { className: 'absolute -top-6 left-0 rounded bg-blue-500 px-1.5 py-0.5 text-[10px] text-white' }, `${draftRect.width} × ${draftRect.height}`)
           )
         ),
-        connecting && linkPointer && pendingClickSourceRef.current && React.createElement(ViewportPortal, null,
-          (() => {
-            const source = canvasDocumentNodes.find((node) => node.id === pendingClickSourceRef.current)
-            if (!source) return null
-            const x1 = source.position.x + source.size.width / 2
-            const y1 = source.position.y + source.size.height / 2
-            return React.createElement('svg', { className: 'pointer-events-none absolute left-0 top-0 size-px overflow-visible' },
-              React.createElement('path', { d: `M ${x1} ${y1} L ${linkPointer.x} ${linkPointer.y}`, fill: 'none', stroke: '#93c5fd', strokeWidth: 3, strokeDasharray: '8 5' })
-            )
-          })()
+        draftPoints.length > 1 && activeTool === 'freehand' && React.createElement(ViewportPortal, null,
+          React.createElement('svg', { className: 'pointer-events-none absolute left-0 top-0 size-px overflow-visible' },
+            React.createElement('polyline', {
+              className: 'canvas-freehand-preview',
+              points: draftPoints.map((point) => `${point.x},${point.y}`).join(' '),
+              fill: 'none',
+              stroke: '#60a5fa',
+              strokeWidth: 3,
+              strokeLinecap: 'round',
+              strokeLinejoin: 'round',
+            })
+          )
+        ),
+        activeTool === 'link' && React.createElement(ViewportPortal, null,
+          React.createElement(React.Fragment, null,
+            canvasDocumentNodes.map((node) => React.createElement('div', {
+              key: `connection-target-${node.id}`,
+              className: `canvas-connection-target pointer-events-none absolute rounded-lg border-2 bg-transparent transition-colors ${
+                connectionSourceId === node.id
+                  ? 'border-blue-400 shadow-[0_0_0_3px_rgba(96,165,250,0.18)]'
+                  : connectionTargetId === node.id
+                    ? 'border-cyan-300 bg-cyan-300/10 shadow-[0_0_0_3px_rgba(103,232,249,0.16)]'
+                    : 'border-transparent'
+              }`,
+              style: { left: node.position.x, top: node.position.y, width: node.size.width, height: node.size.height, zIndex: node.zIndex + 10_000 },
+              'aria-hidden': true,
+            }))
+          )
         ),
         React.createElement(MiniMap, {
           nodeColor: (node: any) => {
@@ -730,6 +854,57 @@ export const CanvasSurface: React.FC<CanvasSurfaceProps> = ({
           zoomable: true,
           ariaLabel: 'Canvas minimap',
         })
+      )}
+      {connecting && linkPointer && connectionSourceId && (() => {
+        const source = canvasDocumentNodes.find((node) => node.id === connectionSourceId)
+        if (!source) return null
+        const viewport = reactFlowInstanceRef.current?.getViewport?.() ?? { x: 0, y: 0, zoom: 1 }
+        const startFlow = nearestNodeAnchor(source, linkPointer)
+        const start = {
+          x: startFlow.x * viewport.zoom + viewport.x,
+          y: startFlow.y * viewport.zoom + viewport.y,
+        }
+        const end = {
+          x: linkPointer.x * viewport.zoom + viewport.x,
+          y: linkPointer.y * viewport.zoom + viewport.y,
+        }
+        const bend = Math.max(40, Math.abs(end.x - start.x) * 0.35)
+        const direction = end.x >= start.x ? 1 : -1
+        const path = `M ${start.x} ${start.y} C ${start.x + direction * bend} ${start.y}, ${end.x - direction * bend} ${end.y}, ${end.x} ${end.y}`
+        return (
+          <svg className="pointer-events-none absolute inset-0 z-[45] size-full overflow-visible" aria-hidden="true">
+            <path className="canvas-connection-preview" d={path} fill="none" stroke="#93c5fd" strokeWidth={3} strokeDasharray="8 5" strokeLinecap="round" />
+            <circle className="canvas-connection-pointer" cx={end.x} cy={end.y} r={5} fill="#93c5fd" stroke="#eff6ff" strokeWidth={2} />
+          </svg>
+        )
+      })()}
+      {activeTool === 'link' && (
+        <div
+          className="canvas-connection-capture absolute inset-0 z-40 cursor-crosshair"
+          role="button"
+          tabIndex={0}
+          aria-label="Canvas connection target picker"
+          onPointerMove={(event) => {
+            const point = toCanvasPoint(event, false)
+            scheduleLinkPointer(point)
+            const target = [...canvasDocumentNodes]
+              .sort((a, b) => b.zIndex - a.zIndex)
+              .find((node) => point.x >= node.position.x && point.x <= node.position.x + node.size.width && point.y >= node.position.y && point.y <= node.position.y + node.size.height)
+            setConnectionTargetId(target?.id ?? null)
+          }}
+          onPointerLeave={() => setConnectionTargetId(null)}
+          onClick={(event) => {
+            const point = toCanvasPoint(event, false)
+            const target = [...canvasDocumentNodes]
+              .sort((a, b) => b.zIndex - a.zIndex)
+              .find((node) => point.x >= node.position.x && point.x <= node.position.x + node.size.width && point.y >= node.position.y && point.y <= node.position.y + node.size.height)
+            if (target) handleConnectionNodeClick(target.id)
+            else cancelConnection()
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') cancelConnection()
+          }}
+        />
       )}
     </div>
   )

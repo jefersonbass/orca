@@ -39,7 +39,7 @@ export const NewTerminalDialog: React.FC<{
 
   return (
     <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/45 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}>
-      <div className="w-[520px] max-w-full rounded-xl border border-worktree-sidebar-border bg-worktree-sidebar p-5 shadow-2xl" role="dialog" aria-modal="true" aria-label="New Terminal">
+      <div className="w-[520px] max-w-full rounded-xl border border-worktree-sidebar-border bg-worktree-sidebar p-5 shadow-2xl" role="dialog" aria-modal="true" aria-label={`New ${kind === 'agent' ? 'Agent' : 'Terminal'}`}>
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h2 className="text-[15px] font-semibold text-worktree-sidebar-foreground">New {kind === 'agent' ? 'Agent' : 'Terminal'}</h2>
@@ -64,7 +64,7 @@ export const NewTerminalDialog: React.FC<{
           <label className="block text-xs text-worktree-sidebar-foreground/60">Terminal name<input value={name} onChange={(event) => setName(event.target.value)} className="mt-1 w-full rounded-md border border-worktree-sidebar-border bg-transparent px-2.5 py-2 text-sm text-worktree-sidebar-foreground outline-none focus:border-blue-400" /></label>
           <label className="block text-xs text-worktree-sidebar-foreground/60">Command<input value={command} onChange={(event) => setCommand(event.target.value)} placeholder="Optional startup command" className="mt-1 w-full rounded-md border border-worktree-sidebar-border bg-transparent px-2.5 py-2 font-mono text-sm text-worktree-sidebar-foreground outline-none focus:border-blue-400" /></label>
           <label className="block text-xs text-worktree-sidebar-foreground/60">Working directory<input value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="Workspace root by default" className="mt-1 w-full rounded-md border border-worktree-sidebar-border bg-transparent px-2.5 py-2 text-sm text-worktree-sidebar-foreground outline-none focus:border-blue-400" /></label>
-          <label className="flex items-center gap-2 text-xs text-worktree-sidebar-foreground/60"><input type="checkbox" checked={monitorActivity} onChange={(event) => setMonitorActivity(event.target.checked)} /> Monitor agent activity</label>
+          <label className="flex items-start gap-2 text-xs text-worktree-sidebar-foreground/60"><input className="mt-0.5" type="checkbox" checked={monitorActivity} onChange={(event) => setMonitorActivity(event.target.checked)} /><span>Monitor agent activity<span className="mt-0.5 block text-[10px] text-worktree-sidebar-foreground/35">Show live Working, Waiting, Blocked and Done states reported by supported agent hooks.</span></span></label>
         </div>
 
         <div className="mt-5 flex justify-end gap-2">

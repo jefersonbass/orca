@@ -112,7 +112,7 @@ export const DrawingNode: React.FC<NodeProps<DrawingNodeType>> = React.memo(
       >
         <svg
           className="size-full"
-          viewBox={!data.points ? '0 0 100 100' : undefined}
+          viewBox="0 0 100 100"
           preserveAspectRatio="none"
           style={{ minWidth: 40, minHeight: 40, overflow: 'visible' }}
         >

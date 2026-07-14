@@ -157,11 +157,13 @@ describe('launchAgentInNewTab', () => {
 
     launchAgentInNewTab({
       agent: 'codex',
-      worktreeId: 'wt-1'
+      worktreeId: 'wt-1',
+      startupCwd: 'packages/canvas'
     })
 
     expect(mockCreateTab).toHaveBeenCalledWith('wt-1', undefined, undefined, {
-      launchAgent: 'codex'
+      launchAgent: 'codex',
+      startupCwd: 'packages/canvas'
     })
   })
 

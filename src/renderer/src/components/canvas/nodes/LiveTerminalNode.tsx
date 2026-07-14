@@ -109,6 +109,7 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
           ref={portalRef}
           className="nodrag nopan nowheel relative flex h-[calc(100%-32px)] w-full min-h-0 items-center justify-center"
           onClick={handleFocus}
+          onPointerDown={(event) => event.stopPropagation()}
           data-pane-key={paneKey}
         >
           {!hasTerminal && (
