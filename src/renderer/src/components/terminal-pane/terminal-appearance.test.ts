@@ -400,7 +400,12 @@ describe('applyTerminalAppearance theme assignment', () => {
     } as unknown as PaneManager
   }
 
-  function apply(pane: ManagedPane, settings: ReturnType<typeof getDefaultSettings>): void {
+  function apply(
+    pane: ManagedPane,
+    settings: ReturnType<typeof getDefaultSettings>,
+    terminalDisplayScale = 1,
+    preserveLogicalGrid = false
+  ): void {
     applyTerminalAppearance(
       makeManager([pane]),
       settings,
@@ -409,7 +414,9 @@ describe('applyTerminalAppearance theme assignment', () => {
       new Map(),
       'false',
       new Map(),
-      new Map()
+      new Map(),
+      terminalDisplayScale,
+      preserveLogicalGrid
     )
   }
 
@@ -427,6 +434,27 @@ describe('applyTerminalAppearance theme assignment', () => {
     // modifyColors mutation survives the font tweak.
     expect(pane.terminal.options.theme).toBe(firstTheme)
     expect(pane.terminal.options.fontSize).toBe(settings.terminalFontSize + 2)
+  })
+
+  it('scales font metrics with Canvas zoom without changing the base setting', () => {
+    const pane = makePane(1)
+    const settings = getDefaultSettings('/tmp')
+
+    apply(pane, settings, 0.5)
+
+    expect(pane.terminal.options.fontSize).toBe(settings.terminalFontSize * 0.5)
+    expect(settings.terminalFontSize).toBe(getDefaultSettings('/tmp').terminalFontSize)
+  })
+
+  it('keeps scaled font metrics when Canvas zoom preserves the logical grid', () => {
+    const pane = makePane(1)
+    const settings = getDefaultSettings('/tmp')
+
+    apply(pane, settings, 0.8, true)
+
+    expect(pane.terminal.options.fontSize).toBe(settings.terminalFontSize * 0.8)
+    expect(pane.terminal.cols).toBe(80)
+    expect(pane.terminal.rows).toBe(24)
   })
 
   it('still assigns a fresh theme when composed values actually change', () => {

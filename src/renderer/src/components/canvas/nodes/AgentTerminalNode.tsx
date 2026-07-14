@@ -4,7 +4,10 @@ import { Handle, Position, useStore } from '@xyflow/react'
 import { getCanvasPortalTargets, setCanvasPortalTargets } from '../canvas-terminal-portal'
 import type { CanvasResourceReference } from '../../../../../shared/canvas-types'
 import { CanvasNodeResizer } from '../CanvasNodeResizer'
-import { canvasTerminalPortalStyle } from '../canvas-terminal-portal-geometry'
+import {
+  canvasTerminalPortalStyle,
+  normalizeCanvasTerminalZoom
+} from '../canvas-terminal-portal-geometry'
 
 type AgentTerminalNodeType = Node<
   {
@@ -27,7 +30,7 @@ const statusColors: Record<string, string> = {
   blocked: '#ef4444',
   waiting: '#3b82f6',
   done: '#22c55e',
-  disconnected: '#6b7280',
+  disconnected: '#6b7280'
 }
 
 const statusLabels: Record<string, string> = {
@@ -36,34 +39,40 @@ const statusLabels: Record<string, string> = {
   blocked: 'Blocked',
   waiting: 'Waiting',
   done: 'Done',
-  disconnected: 'Disconnected',
+  disconnected: 'Disconnected'
 }
 
-export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
-  React.memo(({ id, data, selected }) => {
+export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> = React.memo(
+  ({ id, data, selected }) => {
     const portalRef = useRef<HTMLDivElement>(null)
     const zoom = useStore((state) => state.transform[2])
     const resourceRef = data.resourceRef
     const paneKey =
       data.paneKey ??
       (resourceRef?.kind === 'agent-pane'
-        ? resourceRef.paneKey ?? `${resourceRef.tabId}:${resourceRef.leafId ?? ''}`.replace(/:$/, '')
+        ? (resourceRef.paneKey ??
+          `${resourceRef.tabId}:${resourceRef.leafId ?? ''}`.replace(/:$/, ''))
         : resourceRef?.kind === 'agent-terminal'
           ? resourceRef.paneKey
           : undefined)
-    const tabId = resourceRef?.kind === 'agent-pane'
-      ? resourceRef.tabId
-      : resourceRef?.kind === 'terminal-tab'
+    const tabId =
+      resourceRef?.kind === 'agent-pane'
         ? resourceRef.tabId
-        : paneKey?.split(':')[0]
-    const worktreeId = resourceRef?.kind === 'agent-pane'
-      ? resourceRef.worktreeId
-      : resourceRef?.kind === 'terminal-tab'
+        : resourceRef?.kind === 'terminal-tab'
+          ? resourceRef.tabId
+          : paneKey?.split(':')[0]
+    const worktreeId =
+      resourceRef?.kind === 'agent-pane'
         ? resourceRef.worktreeId
-        : ''
+        : resourceRef?.kind === 'terminal-tab'
+          ? resourceRef.worktreeId
+          : ''
     const portalKey = paneKey ?? (tabId ? `canvas-tab:${tabId}` : undefined)
     const statusColor = statusColors[data.agentStatus ?? 'idle'] ?? statusColors.idle
-    const statusLabel = data.monitorActivity === false ? 'Monitoring off' : statusLabels[data.agentStatus ?? 'idle'] ?? 'Unknown'
+    const statusLabel =
+      data.monitorActivity === false
+        ? 'Monitoring off'
+        : (statusLabels[data.agentStatus ?? 'idle'] ?? 'Unknown')
 
     const borderColor = data.color ?? (selected ? '#3b82f6' : '#533483')
     const hasColor = !!data.color
@@ -71,35 +80,53 @@ export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
 
     // Register portal target on mount
     useEffect(() => {
-      if (!portalKey || !tabId || !portalRef.current) return
+      if (!portalKey || !tabId || !portalRef.current) {
+        return
+      }
       const target = portalRef.current
       const existing = getCanvasPortalTargets()
       setCanvasPortalTargets([
         ...existing.filter((entry) => entry.target !== target && entry.paneKey !== portalKey),
-        { paneKey, tabId, worktreeId, target, active: true }
+        {
+          paneKey,
+          tabId,
+          worktreeId,
+          target,
+          active: true,
+          displayScale: normalizeCanvasTerminalZoom(zoom)
+        }
       ])
-      return () => setCanvasPortalTargets(getCanvasPortalTargets().filter((entry) => entry.target !== target))
-    }, [paneKey, portalKey, tabId, worktreeId])
+      return () =>
+        setCanvasPortalTargets(getCanvasPortalTargets().filter((entry) => entry.target !== target))
+    }, [paneKey, portalKey, tabId, worktreeId, zoom])
 
     const handleFocus = useCallback(() => {
       portalRef.current?.querySelector<HTMLElement>('.xterm-helper-textarea')?.focus()
-    }, [paneKey])
+    }, [])
 
     return (
       <div
         className={`size-full min-w-0 min-h-0 overflow-hidden rounded-lg border-2 bg-worktree-sidebar shadow-sm ${
-          selected ? 'border-blue-500' : hasColor ? 'border-dashed' : 'border-worktree-sidebar-border'
+          selected
+            ? 'border-blue-500'
+            : hasColor
+              ? 'border-dashed'
+              : 'border-worktree-sidebar-border'
         }`}
         style={{
-          borderColor: hasColor ? borderColor : undefined,
+          borderColor: hasColor ? borderColor : undefined
         }}
         role="application"
         aria-label={`Agent terminal: ${data.label}, ${statusLabel}`}
         onClickCapture={(event) => {
           const handle = (event.target as HTMLElement).closest('.react-flow__handle')
-          if (!handle) return
+          if (!handle) {
+            return
+          }
           const handleType = handle.classList.contains('source') ? 'source' : 'target'
-          window.dispatchEvent(new CustomEvent('orca:canvas-handle-click', { detail: { nodeId: id, handleType } }))
+          window.dispatchEvent(
+            new CustomEvent('orca:canvas-handle-click', { detail: { nodeId: id, handleType } })
+          )
         }}
         tabIndex={0}
       >
@@ -137,16 +164,29 @@ export const AgentTerminalNode: React.FC<NodeProps<AgentTerminalNodeType>> =
           />
           {!hasAgent && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center">
-              <div className="text-xs text-worktree-sidebar-foreground/45">No live agent attached</div>
-              <div className="text-[10px] text-worktree-sidebar-foreground/30">Add an agent from the + menu to start working</div>
+              <div className="text-xs text-worktree-sidebar-foreground/45">
+                No live agent attached
+              </div>
+              <div className="text-[10px] text-worktree-sidebar-foreground/30">
+                Add an agent from the + menu to start working
+              </div>
             </div>
           )}
         </div>
 
         <CanvasNodeResizer visible={data.resizeEnabled} minWidth={260} minHeight={150} />
-        <Handle type="source" position={Position.Bottom} className="!size-3 !border-0 !bg-transparent !opacity-0" />
-        <Handle type="target" position={Position.Top} className="!size-3 !border-0 !bg-transparent !opacity-0" />
+        <Handle
+          type="source"
+          position={Position.Bottom}
+          className="!size-3 !border-0 !bg-transparent !opacity-0"
+        />
+        <Handle
+          type="target"
+          position={Position.Top}
+          className="!size-3 !border-0 !bg-transparent !opacity-0"
+        />
       </div>
     )
-  })
+  }
+)
 AgentTerminalNode.displayName = 'AgentTerminalNode'

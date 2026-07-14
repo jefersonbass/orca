@@ -4,7 +4,10 @@ import { Handle, Position, useStore } from '@xyflow/react'
 import { setCanvasPortalTargets, getCanvasPortalTargets } from '../canvas-terminal-portal'
 import type { CanvasResourceReference } from '../../../../../shared/canvas-types'
 import { CanvasNodeResizer } from '../CanvasNodeResizer'
-import { canvasTerminalPortalStyle } from '../canvas-terminal-portal-geometry'
+import {
+  canvasTerminalPortalStyle,
+  normalizeCanvasTerminalZoom
+} from '../canvas-terminal-portal-geometry'
 
 type LiveTerminalNodeType = Node<
   {
@@ -19,18 +22,14 @@ type LiveTerminalNodeType = Node<
   'live-terminal'
 >
 
-export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
-  React.memo(({ id, data, selected }) => {
+export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> = React.memo(
+  ({ id, data, selected }) => {
     const portalRef = useRef<HTMLDivElement>(null)
     const zoom = useStore((state) => state.transform[2])
     const resourceRef = data.resourceRef
     const paneKey =
-      data.paneKey ??
-      (resourceRef?.kind === 'live-terminal' ? resourceRef.paneKey : undefined)
-    const tabId =
-      resourceRef?.kind === 'terminal-tab'
-        ? resourceRef.tabId
-        : paneKey?.split(':')[0]
+      data.paneKey ?? (resourceRef?.kind === 'live-terminal' ? resourceRef.paneKey : undefined)
+    const tabId = resourceRef?.kind === 'terminal-tab' ? resourceRef.tabId : paneKey?.split(':')[0]
     const worktreeId = resourceRef?.kind === 'terminal-tab' ? resourceRef.worktreeId : ''
     const portalKey = paneKey ?? (tabId ? `canvas-tab:${tabId}` : undefined)
     const statusColor =
@@ -48,13 +47,22 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
 
     // Register portal target on mount, unregister on unmount
     useEffect(() => {
-      if (!portalKey || !tabId || !portalRef.current) return
+      if (!portalKey || !tabId || !portalRef.current) {
+        return
+      }
       const target = portalRef.current
       {
         const existing = getCanvasPortalTargets()
         setCanvasPortalTargets([
           ...existing.filter((entry) => entry.target !== target && entry.paneKey !== portalKey),
-          { paneKey, tabId, worktreeId, target, active: true },
+          {
+            paneKey,
+            tabId,
+            worktreeId,
+            target,
+            active: true,
+            displayScale: normalizeCanvasTerminalZoom(zoom)
+          }
         ])
       }
 
@@ -62,7 +70,7 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
         const remaining = getCanvasPortalTargets().filter((t) => t.target !== target)
         setCanvasPortalTargets(remaining)
       }
-    }, [paneKey, portalKey, tabId, worktreeId])
+    }, [paneKey, portalKey, tabId, worktreeId, zoom])
 
     // Keyboard focus handler — focus the terminal on click
     const handleFocus = useCallback(() => {
@@ -72,18 +80,26 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
     return (
       <div
         className={`size-full min-w-0 min-h-0 overflow-hidden rounded-lg border-2 bg-worktree-sidebar shadow-sm ${
-          selected ? 'border-blue-500' : hasColor ? 'border-dashed' : 'border-worktree-sidebar-border'
+          selected
+            ? 'border-blue-500'
+            : hasColor
+              ? 'border-dashed'
+              : 'border-worktree-sidebar-border'
         }`}
         style={{
-          borderColor: hasColor ? borderColor : undefined,
+          borderColor: hasColor ? borderColor : undefined
         }}
         role="application"
         aria-label={`Live terminal: ${data.label}, ${data.status ?? 'connected'}`}
         onClickCapture={(event) => {
           const handle = (event.target as HTMLElement).closest('.react-flow__handle')
-          if (!handle) return
+          if (!handle) {
+            return
+          }
           const handleType = handle.classList.contains('source') ? 'source' : 'target'
-          window.dispatchEvent(new CustomEvent('orca:canvas-handle-click', { detail: { nodeId: id, handleType } }))
+          window.dispatchEvent(
+            new CustomEvent('orca:canvas-handle-click', { detail: { nodeId: id, handleType } })
+          )
         }}
         tabIndex={0}
       >
@@ -98,11 +114,7 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
             {data.label}
           </span>
           <span className="ml-auto text-[10px] text-worktree-sidebar-foreground/30">
-            {data.status === 'connected'
-              ? '●'
-              : data.status === 'disconnected'
-                ? '○'
-                : '◌'}
+            {data.status === 'connected' ? '●' : data.status === 'disconnected' ? '○' : '◌'}
           </span>
         </div>
 
@@ -120,16 +132,29 @@ export const LiveTerminalNode: React.FC<NodeProps<LiveTerminalNodeType>> =
           />
           {!hasTerminal && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center">
-              <div className="text-xs text-worktree-sidebar-foreground/45">No terminal attached</div>
-              <div className="text-[10px] text-worktree-sidebar-foreground/30">Add a terminal from the + menu to start working</div>
+              <div className="text-xs text-worktree-sidebar-foreground/45">
+                No terminal attached
+              </div>
+              <div className="text-[10px] text-worktree-sidebar-foreground/30">
+                Add a terminal from the + menu to start working
+              </div>
             </div>
           )}
         </div>
 
         <CanvasNodeResizer visible={data.resizeEnabled} minWidth={260} minHeight={150} />
-        <Handle type="source" position={Position.Bottom} className="!size-3 !border-0 !bg-transparent !opacity-0" />
-        <Handle type="target" position={Position.Top} className="!size-3 !border-0 !bg-transparent !opacity-0" />
+        <Handle
+          type="source"
+          position={Position.Bottom}
+          className="!size-3 !border-0 !bg-transparent !opacity-0"
+        />
+        <Handle
+          type="target"
+          position={Position.Top}
+          className="!size-3 !border-0 !bg-transparent !opacity-0"
+        />
       </div>
     )
-  })
+  }
+)
 LiveTerminalNode.displayName = 'LiveTerminalNode'

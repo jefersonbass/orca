@@ -27,6 +27,7 @@ const EMPTY_TERMINAL_TABS: readonly TerminalTab[] = []
 const EMPTY_UNIFIED_TABS: readonly Tab[] = []
 const EMPTY_GROUPS: readonly TabGroup[] = []
 const EMPTY_ACTIVITY_PORTALS: ActivityTerminalPortalTarget[] = []
+const EMPTY_CANVAS_PORTALS: CanvasPortalTarget[] = []
 const HAS_CSS_ANCHOR_POSITIONING =
   typeof CSS !== 'undefined' &&
   CSS.supports('position-anchor', '--orca-terminal-overlay-probe') &&
@@ -232,13 +233,18 @@ const TerminalOverlaySlot = memo(function TerminalOverlaySlot({
       tabId={terminalTabId}
       worktreeId={worktreeId}
       cwd={startupCwd || worktreePath || '.'}
-      isActive={isActive || activityTerminalPortal?.active === true || canvasTerminalPortal?.active === true}
+      isActive={
+        isActive || activityTerminalPortal?.active === true || canvasTerminalPortal?.active === true
+      }
       // Why: split-group changes reparent TabGroupPanel subtrees. Keeping the
       // TerminalPane mounted here preserves alt-screen TUI state while this
       // flag still lets hidden tabs throttle rendering.
       isVisible={isVisible || activityTerminalPortal !== null || canvasTerminalPortal !== null}
-      isWorktreeActive={isWorktreeActive || activityTerminalPortal !== null || canvasTerminalPortal !== null}
+      isWorktreeActive={
+        isWorktreeActive || activityTerminalPortal !== null || canvasTerminalPortal !== null
+      }
       embeddedInCanvas={canvasTerminalPortal !== null}
+      terminalDisplayScale={canvasTerminalPortal?.displayScale ?? 1}
       isolatedPaneKey={activityTerminalPortal?.paneKey ?? null}
       onPtyExit={(ptyId) => {
         if (consumeSuppressedPtyExit(ptyId)) {
@@ -302,7 +308,7 @@ const TerminalPaneOverlayLayer = memo(function TerminalPaneOverlayLayer({
   coldParkTerminalPanes = false,
   shouldMeasureHiddenWorktree = false,
   activityTerminalPortals = EMPTY_ACTIVITY_PORTALS,
-  canvasTerminalPortals = [],
+  canvasTerminalPortals = EMPTY_CANVAS_PORTALS,
   backgroundMountTabIds = null
 }: {
   worktreeId: string

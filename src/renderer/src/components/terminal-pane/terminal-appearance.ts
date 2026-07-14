@@ -236,7 +236,9 @@ export function applyTerminalAppearance(
   paneTransports: Map<number, PtyTransport>,
   effectiveMacOptionAsAlt: EffectiveMacOptionAsAlt,
   paneMode2031: Map<number, boolean>,
-  paneLastThemeMode: Map<number, 'dark' | 'light'>
+  paneLastThemeMode: Map<number, 'dark' | 'light'>,
+  terminalDisplayScale = 1,
+  preserveLogicalGrid = false
 ): void {
   const appearance = resolveEffectiveTerminalAppearance(settings, systemPrefersDark)
   const paneStyles = resolvePaneStyleOptions(settings)
@@ -276,7 +278,7 @@ export function applyTerminalAppearance(
     pane.terminal.options.cursorInactiveStyle = resolveTerminalCursorInactiveStyle(cursorStyle)
     pane.terminal.options.cursorBlink = settings.terminalCursorBlink
     const paneSize = paneFontSizes.get(pane.id)
-    pane.terminal.options.fontSize = paneSize ?? settings.terminalFontSize
+    pane.terminal.options.fontSize = (paneSize ?? settings.terminalFontSize) * terminalDisplayScale
     pane.terminal.options.fontFamily = buildFontFamily(settings.terminalFontFamily)
     pane.terminal.options.fontWeight = terminalFontWeights.fontWeight
     pane.terminal.options.fontWeightBold = terminalFontWeights.fontWeightBold
@@ -300,12 +302,14 @@ export function applyTerminalAppearance(
     // separate hook and lets live toggles (settings change, font swap)
     // land immediately.
     manager.setPaneLigaturesEnabled(pane.id, ligaturesEnabled)
-    try {
-      const state = captureScrollState(pane.terminal)
-      safeFit(pane)
-      restoreScrollState(pane.terminal, state)
-    } catch {
-      /* ignore */
+    if (!preserveLogicalGrid) {
+      try {
+        const state = captureScrollState(pane.terminal)
+        safeFit(pane)
+        restoreScrollState(pane.terminal, state)
+      } catch {
+        /* ignore */
+      }
     }
     const transport = paneTransports.get(pane.id)
     // Why: skip PTY resize when a mobile-fit override is active — the PTY

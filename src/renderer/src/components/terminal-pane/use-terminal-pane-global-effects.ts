@@ -40,6 +40,9 @@ type UseTerminalPaneGlobalEffectsArgs = {
   paneTransportsRef: React.RefObject<Map<number, PtyTransport>>
   isActiveRef: React.RefObject<boolean>
   isVisibleRef: React.RefObject<boolean>
+  terminalDisplayScaleRef?: React.RefObject<number>
+  logicalCanvasSizeRef?: React.RefObject<{ width: number; height: number } | null>
+  logicalGridLockRef?: React.RefObject<Map<string, { cols: number; rows: number }> | null>
   toggleExpandPane: (paneId: number) => void
 }
 
@@ -72,6 +75,9 @@ export function useTerminalPaneGlobalEffects({
   paneTransportsRef,
   isActiveRef,
   isVisibleRef,
+  terminalDisplayScaleRef,
+  logicalCanvasSizeRef,
+  logicalGridLockRef,
   toggleExpandPane
 }: UseTerminalPaneGlobalEffectsArgs): void {
   const worktreeIdRef = useRef(worktreeId)
@@ -114,7 +120,10 @@ export function useTerminalPaneGlobalEffects({
     isVisible: rendererVisible,
     isSyncFitEnabled,
     managerRef,
-    containerRef
+    containerRef,
+    terminalDisplayScaleRef,
+    logicalCanvasSizeRef,
+    logicalGridLockRef
   })
   useTerminalWindowWakeRecovery({
     isVisible: rendererVisible,

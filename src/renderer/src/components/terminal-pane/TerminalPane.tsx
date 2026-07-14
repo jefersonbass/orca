@@ -149,6 +149,10 @@ import { restoreTerminalFitToDesktop, restoreTerminalFitsToDesktop } from './ter
 import { useVisibleTerminalTabClaim } from './use-visible-terminal-tab-claim'
 import { TerminalSshReconnectOverlay } from './TerminalSshReconnectOverlay'
 import { selectTerminalTabAgentTypesByLeaf } from './terminal-tab-agent-type-index'
+import {
+  registerTerminalQuickCommandTarget,
+  sendTerminalQuickCommandToPane
+} from './terminal-quick-command-dispatch'
 
 const NATIVE_CHAT_ROOT_SELECTOR = '[data-native-chat-root="true"]'
 
@@ -195,6 +199,10 @@ import {
   setRegularTerminalInputFocusAttribute
 } from './regular-terminal-focus-ownership'
 import { refreshTerminalImeInputContext } from './terminal-ime-input-context-refresh'
+import {
+  clearCanvasTerminalFitLock,
+  setCanvasTerminalFitLock
+} from '@/lib/pane-manager/canvas-terminal-fit-lock'
 
 type TerminalPaneProps = {
   tabId: string
@@ -205,6 +213,9 @@ type TerminalPaneProps = {
   isWorktreeActive?: boolean
   /** Canvas portals are embedded inside React Flow nodes, not a tab group. */
   embeddedInCanvas?: boolean
+  /** Visual scale of the Canvas portal. Font and cell metrics scale with it
+   * while the terminal's logical row/column count remains stable. */
+  terminalDisplayScale?: number
   // Why: when set (Activity portal), this pane visually isolates the given
   // split pane so only that leaf is shown. Implemented as a transient layout
   // override (separate snapshot ref) — does NOT touch expandedPaneId state
@@ -277,6 +288,7 @@ export default function TerminalPane({
   isVisible = true,
   isWorktreeActive = isVisible,
   embeddedInCanvas = false,
+  terminalDisplayScale = 1,
   isolatedPaneKey = null,
   onPtyExit,
   onCloseTab
@@ -298,6 +310,98 @@ export default function TerminalPane({
     new Map()
   )
   const paneTransportsRef = useRef<Map<number, PtyTransport>>(new Map())
+  useEffect(
+    () =>
+      registerTerminalQuickCommandTarget(tabId, (command) => {
+        const pane = managerRef.current?.getActivePane()
+        if (!pane) {
+          return false
+        }
+        const transport = paneTransportsRef.current.get(pane.id)
+        if (!transport?.getPtyId()) {
+          return false
+        }
+        const buffer = pane.terminal.buffer.active
+        const hasShellOutput = buffer.cursorX > 0 || buffer.cursorY > 0 || buffer.baseY > 0
+        if (!hasShellOutput) {
+          return false
+        }
+        return sendTerminalQuickCommandToPane({ command, pane, tabId, transport })
+      }),
+    [tabId]
+  )
+  const previousTerminalDisplayScaleRef = useRef(terminalDisplayScale)
+  const terminalDisplayScaleRef = useRef(terminalDisplayScale)
+  terminalDisplayScaleRef.current = terminalDisplayScale
+  const canvasLogicalContainerSizeRef = useRef<{ width: number; height: number } | null>(null)
+  const canvasZoomGridLockRef = useRef<Map<string, { cols: number; rows: number }> | null>(null)
+  if (
+    embeddedInCanvas &&
+    previousTerminalDisplayScaleRef.current !== terminalDisplayScale &&
+    managerRef.current
+  ) {
+    // Capture during render, before the portal geometry commit can trigger
+    // ResizeObserver/safeFit with the new Canvas scale.
+    if (!canvasZoomGridLockRef.current) {
+      canvasZoomGridLockRef.current = new Map(
+        managerRef.current
+          .getPanes()
+          .map((pane) => [pane.leafId, { cols: pane.terminal.cols, rows: pane.terminal.rows }])
+      )
+    }
+    previousTerminalDisplayScaleRef.current = terminalDisplayScale
+  }
+  useLayoutEffect(() => {
+    const gridLock = canvasZoomGridLockRef.current
+    if (!embeddedInCanvas || !gridLock) {
+      return
+    }
+
+    const restoreLogicalGrid = (): void => {
+      const manager = managerRef.current
+      if (!manager) {
+        return
+      }
+      for (const pane of manager.getPanes()) {
+        const locked = gridLock.get(pane.leafId)
+        if (!locked) {
+          continue
+        }
+        setCanvasTerminalFitLock(pane.container, locked)
+        if (pane.terminal.cols !== locked.cols || pane.terminal.rows !== locked.rows) {
+          pane.terminal.resize(locked.cols, locked.rows)
+        }
+        const transport = paneTransportsRef.current.get(pane.id)
+        if (transport?.isConnected() && transport.getPtyId()) {
+          transport.resize(locked.cols, locked.rows)
+        }
+      }
+    }
+
+    const frameId = window.requestAnimationFrame(restoreLogicalGrid)
+    // Terminal visibility/fit recovery has delayed passes through 900 ms.
+    // The fit observer retains this lock until the node's normalized Canvas
+    // dimensions actually change, which distinguishes resize from viewport zoom.
+    const settleTimers = [50, 150, 400, 900, 1_200].map((delay) =>
+      window.setTimeout(restoreLogicalGrid, delay)
+    )
+
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      for (const timer of settleTimers) {
+        window.clearTimeout(timer)
+      }
+    }
+  }, [embeddedInCanvas, terminalDisplayScale])
+  useEffect(() => {
+    if (embeddedInCanvas) {
+      return
+    }
+    canvasZoomGridLockRef.current = null
+    for (const pane of managerRef.current?.getPanes() ?? []) {
+      clearCanvasTerminalFitLock(pane.container)
+    }
+  }, [embeddedInCanvas])
   // Why: per-pane live cwd tracked via OSC 7 for split-pane cwd inheritance.
   // See docs/ssh-split-pane-inherit-cwd.md. The OSC 7 handler is installed
   // in use-terminal-pane-lifecycle; keyboard and context-menu split actions
@@ -1455,6 +1559,7 @@ export default function TerminalPane({
     systemPrefersDark,
     settings,
     settingsRef,
+    terminalDisplayScale,
     requestOpenLinksInAppPreference,
     effectiveMacOptionAsAlt,
     effectiveMacOptionAsAltRef: macOptionAsAltRef,
@@ -1765,7 +1870,14 @@ export default function TerminalPane({
     }
   }, [consumePendingCodexPaneRestart, handleRestartCodexPane, pendingCodexPaneRestartIds])
 
-  useTerminalFontZoom({ isActive, containerRef, managerRef, paneFontSizesRef, settingsRef })
+  useTerminalFontZoom({
+    isActive,
+    containerRef,
+    managerRef,
+    paneFontSizesRef,
+    settingsRef,
+    terminalDisplayScale
+  })
 
   useTerminalKeyboardShortcuts({
     tabId,
@@ -1818,6 +1930,9 @@ export default function TerminalPane({
     paneTransportsRef,
     isActiveRef,
     isVisibleRef,
+    terminalDisplayScaleRef,
+    logicalCanvasSizeRef: canvasLogicalContainerSizeRef,
+    logicalGridLockRef: canvasZoomGridLockRef,
     toggleExpandPane
   })
 

@@ -1,12 +1,12 @@
 import { useAppStore } from '@/store'
 import { reconcileTabOrder } from '@/components/tab-bar/reconcile-order'
 import { launchAgentInNewTab } from '@/lib/launch-agent-in-new-tab'
+import { queueTerminalQuickCommandForTab } from '@/components/terminal-pane/terminal-quick-command-dispatch'
 import {
-  flattenTerminalQuickCommand,
   isTerminalAgentQuickCommand,
   supportsTerminalAgentQuickCommand
 } from '../../../shared/terminal-quick-commands'
-import type { TerminalQuickCommand } from '../../../shared/types'
+import type { TerminalQuickCommand, TuiAgent } from '../../../shared/types'
 
 export type RunQuickCommandInNewTabArgs = {
   command: TerminalQuickCommand
@@ -16,6 +16,8 @@ export type RunQuickCommandInNewTabArgs = {
   groupId?: string | null
   /** Optional working directory for the terminal that runs the command. */
   startupCwd?: string
+  /** Agent identity when a Canvas agent runs a user-authored raw command. */
+  launchAgent?: TuiAgent
 }
 
 function resolveQuickCommandGroupId(
@@ -36,9 +38,9 @@ function resolveQuickCommandGroupId(
 
 /**
  * Spawn a fresh terminal tab in the given group and queue the quick-command
- * text as the startup command. The PTY connection layer writes the command
- * once the shell is ready, so the user always sees their first prompt before
- * the command runs (mirrors the agent quick-launch path in
+ * for its stable tab id. TerminalPane dispatches it once the live transport
+ * has produced its first shell prompt, so the user always sees that prompt
+ * before the command runs (mirrors the agent quick-launch path in
  * `launchAgentInNewTab`).
  *
  * Terminal-command quick commands always append Enter — the split-button is
@@ -50,7 +52,8 @@ export function runQuickCommandInNewTab({
   command,
   worktreeId,
   groupId,
-  startupCwd
+  startupCwd,
+  launchAgent
 }: RunQuickCommandInNewTabArgs): { tabId: string } | null {
   const targetGroupId = groupId ?? undefined
   if (isTerminalAgentQuickCommand(command)) {
@@ -64,7 +67,7 @@ export function runQuickCommandInNewTab({
       groupId: targetGroupId,
       launchSource: 'quick_command',
       quickCommandLabel: command.label,
-      startupCwd,
+      startupCwd
     })
     if (result?.tabId) {
       const launchedGroupId = resolveQuickCommandGroupId(worktreeId, result.tabId, groupId)
@@ -87,12 +90,13 @@ export function runQuickCommandInNewTab({
   const store = useAppStore.getState()
   const tab = store.createTab(worktreeId, targetGroupId, undefined, {
     quickCommandLabel: command.label,
-    ...(startupCwd?.trim() ? { startupCwd: startupCwd.trim() } : {}),
+    ...(launchAgent ? { launchAgent } : {}),
+    ...(startupCwd?.trim() ? { startupCwd: startupCwd.trim() } : {})
   })
-
-  store.queueTabStartupCommand(tab.id, {
-    command: flattenTerminalQuickCommand(command).command
-  })
+  // TerminalPane can move between the hidden workspace host and a Canvas
+  // portal while its PTY starts. Target the stable tab id and dispatch only
+  // after the live transport has produced its first shell prompt.
+  queueTerminalQuickCommandForTab(tab.id, command)
 
   // Why: match `+` button's createNewTerminalTab — without this, a worktree
   // currently showing an editor file keeps rendering the editor and the new

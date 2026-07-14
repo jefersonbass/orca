@@ -224,6 +224,7 @@ type UseTerminalPaneLifecycleDeps = {
   systemPrefersDark: boolean
   settings: GlobalSettings | null | undefined
   settingsRef: React.RefObject<GlobalSettings | null | undefined>
+  terminalDisplayScale?: number
   requestOpenLinksInAppPreference: TerminalLinkRoutingPreferenceRequester
   /** Resolved Option-as-Alt value: `'auto'` has already been mapped to
    *  `'true' | 'false'` via the keyboard-layout probe. Passed separately
@@ -507,6 +508,7 @@ export function useTerminalPaneLifecycle({
   systemPrefersDark,
   settings,
   settingsRef,
+  terminalDisplayScale = 1,
   requestOpenLinksInAppPreference,
   effectiveMacOptionAsAlt,
   effectiveMacOptionAsAltRef,
@@ -583,8 +585,9 @@ export function useTerminalPaneLifecycle({
   const imeNativeTextForwarderDisposablesRef = useRef(new Map<number, IDisposable>())
   const queuedInitialCwdRef = useRef<string | null | undefined>(undefined)
   const restoredViewportBlankingPanesRef = useRef(new Set<number>())
+  const previousAppearanceDisplayScaleRef = useRef(terminalDisplayScale)
 
-  const applyAppearance = (manager: PaneManager): void => {
+  const applyAppearance = (manager: PaneManager, preserveLogicalGrid = false): void => {
     const currentSettings = settingsRef.current
     if (!currentSettings) {
       return
@@ -597,7 +600,9 @@ export function useTerminalPaneLifecycle({
       paneTransportsRef.current,
       effectiveMacOptionAsAltRef.current,
       paneMode2031Ref.current,
-      paneLastThemeModeRef.current
+      paneLastThemeModeRef.current,
+      terminalDisplayScale,
+      preserveLogicalGrid
     )
   }
 
@@ -1429,7 +1434,7 @@ export function useTerminalPaneLifecycle({
         return {
           ...windowsPtyCompatibilityOptions,
           ...keyboardProtocolOptions,
-          fontSize: currentSettings?.terminalFontSize ?? 14,
+          fontSize: (currentSettings?.terminalFontSize ?? 14) * terminalDisplayScale,
           fontFamily: buildFontFamily(currentSettings?.terminalFontFamily ?? ''),
           fontWeight: terminalFontWeights.fontWeight,
           fontWeightBold: terminalFontWeights.fontWeightBold,
@@ -1618,7 +1623,9 @@ export function useTerminalPaneLifecycle({
     shouldPersistLayout = true
     syncCanExpandState()
     syncPaneCount()
-    applyAppearance(manager)
+    const displayScaleChanged = previousAppearanceDisplayScaleRef.current !== terminalDisplayScale
+    applyAppearance(manager, displayScaleChanged)
+    previousAppearanceDisplayScaleRef.current = terminalDisplayScale
     queueResizeAll(isActive)
     persistLayoutSnapshot()
     scheduleRuntimeGraphSync()
@@ -1898,7 +1905,7 @@ export function useTerminalPaneLifecycle({
     // macOptionIsMeta on every pane so the change takes effect
     // immediately.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, systemPrefersDark, effectiveMacOptionAsAlt])
+  }, [settings, systemPrefersDark, effectiveMacOptionAsAlt, terminalDisplayScale])
 
   useEffect(() => {
     managerRef.current?.setTerminalGpuAcceleration(settings?.terminalGpuAcceleration ?? 'auto')

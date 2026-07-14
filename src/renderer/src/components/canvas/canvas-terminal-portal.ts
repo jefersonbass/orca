@@ -17,6 +17,10 @@ export type CanvasPortalTarget = {
   worktreeId: string
   target: HTMLElement
   active: boolean
+  /** React Flow viewport scale. The portal counter-scales its DOM bounds for
+   * accurate xterm pointer coordinates; TerminalPane applies this value to
+   * font/cell metrics so zoom never changes the terminal's logical grid. */
+  displayScale?: number
 }
 
 let currentTargets: CanvasPortalTarget[] = []
@@ -25,12 +29,16 @@ const subscribers = new Set<() => void>()
 
 export function setCanvasPortalTargets(targets: CanvasPortalTarget[]): void {
   currentTargets = targets
-  for (const subscriber of subscribers) subscriber()
+  for (const subscriber of subscribers) {
+    subscriber()
+  }
 }
 
 function subscribeCanvasPortals(onStoreChange: () => void): () => void {
   subscribers.add(onStoreChange)
-  return () => { subscribers.delete(onStoreChange) }
+  return () => {
+    subscribers.delete(onStoreChange)
+  }
 }
 
 export function useCanvasTerminalPortals(enabled: boolean): CanvasPortalTarget[] {
@@ -47,11 +55,13 @@ export function findCanvasPortal(
   targets: CanvasPortalTarget[],
   match: { paneKey?: string; tabId?: string }
 ): CanvasPortalTarget | null {
-  return targets.find(
-    (t) =>
-      (match.paneKey !== undefined && t.paneKey === match.paneKey) ||
-      (match.tabId !== undefined && t.tabId === match.tabId)
-  ) ?? null
+  return (
+    targets.find(
+      (t) =>
+        (match.paneKey !== undefined && t.paneKey === match.paneKey) ||
+        (match.tabId !== undefined && t.tabId === match.tabId)
+    ) ?? null
+  )
 }
 
 export function getCanvasPortalTargets(): CanvasPortalTarget[] {
@@ -60,5 +70,7 @@ export function getCanvasPortalTargets(): CanvasPortalTarget[] {
 
 export function clearCanvasPortalTargets(): void {
   currentTargets = []
-  for (const subscriber of subscribers) subscriber()
+  for (const subscriber of subscribers) {
+    subscriber()
+  }
 }

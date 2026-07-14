@@ -4,7 +4,10 @@ import { Handle, Position, useStore } from '@xyflow/react'
 import type { CanvasResourceReference } from '../../../../../shared/canvas-types'
 import { CanvasNodeResizer } from '../CanvasNodeResizer'
 import { getCanvasPortalTargets, setCanvasPortalTargets } from '../canvas-terminal-portal'
-import { canvasTerminalPortalStyle } from '../canvas-terminal-portal-geometry'
+import {
+  canvasTerminalPortalStyle,
+  normalizeCanvasTerminalZoom
+} from '../canvas-terminal-portal-geometry'
 
 type OrchestratorNodeType = Node<
   {
@@ -26,7 +29,7 @@ const statusStyles: Record<string, { color: string; bg: string; label: string }>
   proposed: { color: '#3b82f6', bg: '#3b82f620', label: 'Proposed' },
   active: { color: '#22c55e', bg: '#22c55e20', label: 'Active' },
   completed: { color: '#a855f7', bg: '#a855f720', label: 'Completed' },
-  cancelled: { color: '#ef4444', bg: '#ef444420', label: 'Cancelled' },
+  cancelled: { color: '#ef4444', bg: '#ef444420', label: 'Cancelled' }
 }
 
 export const OrchestratorNode: React.FC<NodeProps<OrchestratorNodeType>> = React.memo(
@@ -43,21 +46,44 @@ export const OrchestratorNode: React.FC<NodeProps<OrchestratorNodeType>> = React
 
     useEffect(() => {
       const target = portalRef.current
-      if (!target || !portalKey || !tabId) return
+      if (!target || !portalKey || !tabId) {
+        return
+      }
       const existing = getCanvasPortalTargets()
       setCanvasPortalTargets([
         ...existing.filter((entry) => entry.target !== target && entry.paneKey !== portalKey),
-        { paneKey: undefined, tabId, worktreeId, target, active: true },
+        {
+          paneKey: undefined,
+          tabId,
+          worktreeId,
+          target,
+          active: true,
+          displayScale: normalizeCanvasTerminalZoom(zoom)
+        }
       ])
-      return () => setCanvasPortalTargets(getCanvasPortalTargets().filter((entry) => entry.target !== target))
-    }, [portalKey, tabId, worktreeId])
+      return () =>
+        setCanvasPortalTargets(getCanvasPortalTargets().filter((entry) => entry.target !== target))
+    }, [portalKey, tabId, worktreeId, zoom])
 
     return (
-      <div className={`size-full min-h-0 min-w-0 overflow-hidden rounded-lg border-2 bg-worktree-sidebar shadow-sm ${selected ? 'border-blue-500' : 'border-worktree-sidebar-border'}`} style={{ borderColor: data.color ? borderColor : undefined }} role="application" aria-label={`Orchestrator: ${data.label}`} tabIndex={0}>
+      <div
+        className={`size-full min-h-0 min-w-0 overflow-hidden rounded-lg border-2 bg-worktree-sidebar shadow-sm ${selected ? 'border-blue-500' : 'border-worktree-sidebar-border'}`}
+        style={{ borderColor: data.color ? borderColor : undefined }}
+        role="application"
+        aria-label={`Orchestrator: ${data.label}`}
+        tabIndex={0}
+      >
         <div className="flex h-8 items-center gap-2 border-b border-worktree-sidebar-border px-3">
           <span aria-hidden="true">◎</span>
-          <span className="truncate text-[12px] font-semibold text-worktree-sidebar-foreground">{data.title ?? data.label}</span>
-          <span className="ml-auto rounded px-1.5 py-0.5 text-[10px] font-medium" style={{ background: st.bg, color: st.color }}>{st.label}</span>
+          <span className="truncate text-[12px] font-semibold text-worktree-sidebar-foreground">
+            {data.title ?? data.label}
+          </span>
+          <span
+            className="ml-auto rounded px-1.5 py-0.5 text-[10px] font-medium"
+            style={{ background: st.bg, color: st.color }}
+          >
+            {st.label}
+          </span>
         </div>
         <div className="flex h-[calc(100%-32px)] min-h-0 flex-col">
           <div className="flex h-7 shrink-0 items-center gap-4 border-b border-worktree-sidebar-border/60 px-3 text-[10px] text-worktree-sidebar-foreground/55">
@@ -65,14 +91,21 @@ export const OrchestratorNode: React.FC<NodeProps<OrchestratorNodeType>> = React
             <span>{data.taskCount ?? 0} tasks/context</span>
             <span className="ml-auto capitalize">{data.agentStatus ?? 'idle'}</span>
           </div>
-          <div className="nodrag nopan nowheel relative flex min-h-0 flex-1 items-center justify-center" onPointerDown={(event) => event.stopPropagation()}>
+          <div
+            className="nodrag nopan nowheel relative flex min-h-0 flex-1 items-center justify-center"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
             <div
               ref={portalRef}
               className="absolute left-0 top-0 flex min-h-0 items-center justify-center overflow-hidden"
               style={canvasTerminalPortalStyle(zoom)}
               data-pane-key={portalKey}
             />
-            {!tabId && <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-worktree-sidebar-foreground/40">No coordinator terminal attached</div>}
+            {!tabId && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-worktree-sidebar-foreground/40">
+                No coordinator terminal attached
+              </div>
+            )}
           </div>
         </div>
         <CanvasNodeResizer visible={data.resizeEnabled} minWidth={300} minHeight={180} />

@@ -4,6 +4,7 @@ import { runQuickCommandInNewTab } from './run-quick-command-in-new-tab'
 type MockStoreState = {
   createTab: ReturnType<typeof vi.fn>
   queueTabStartupCommand: ReturnType<typeof vi.fn>
+  consumeTabStartupCommand: ReturnType<typeof vi.fn>
   setActiveTabType: ReturnType<typeof vi.fn>
   setTabBarOrder: ReturnType<typeof vi.fn>
   setRecentQuickCommandForGroup: ReturnType<typeof vi.fn>
@@ -19,7 +20,8 @@ type MockStoreState = {
 }
 
 const mocks = vi.hoisted(() => ({
-  launchAgentInNewTab: vi.fn()
+  launchAgentInNewTab: vi.fn(),
+  queueTerminalQuickCommandForTab: vi.fn()
 }))
 
 let mockState: MockStoreState
@@ -34,10 +36,15 @@ vi.mock('@/lib/launch-agent-in-new-tab', () => ({
   launchAgentInNewTab: mocks.launchAgentInNewTab
 }))
 
+vi.mock('@/components/terminal-pane/terminal-quick-command-dispatch', () => ({
+  queueTerminalQuickCommandForTab: mocks.queueTerminalQuickCommandForTab
+}))
+
 function createStoreState(): MockStoreState {
   return {
     createTab: vi.fn(() => ({ id: 'tab-new' })),
     queueTabStartupCommand: vi.fn(),
+    consumeTabStartupCommand: vi.fn(),
     setActiveTabType: vi.fn(),
     setTabBarOrder: vi.fn(),
     setRecentQuickCommandForGroup: vi.fn(),
@@ -56,17 +63,19 @@ describe('runQuickCommandInNewTab', () => {
   beforeEach(() => {
     mockState = createStoreState()
     mocks.launchAgentInNewTab.mockReset()
+    mocks.queueTerminalQuickCommandForTab.mockReset()
   })
 
-  it('flattens multiline quick commands before queuing', () => {
+  it('queues multiline quick commands for the connected tab', () => {
+    const command = {
+      id: 'build',
+      label: 'Build',
+      action: 'terminal-command' as const,
+      command: 'cd packages\nbun run build\ncd ..',
+      appendEnter: true
+    }
     const result = runQuickCommandInNewTab({
-      command: {
-        id: 'build',
-        label: 'Build',
-        action: 'terminal-command',
-        command: 'cd packages\nbun run build\ncd ..',
-        appendEnter: true
-      },
+      command,
       worktreeId: 'wt-1',
       groupId: 'group-1',
       startupCwd: 'packages/canvas'
@@ -77,10 +86,32 @@ describe('runQuickCommandInNewTab', () => {
       quickCommandLabel: 'Build',
       startupCwd: 'packages/canvas'
     })
-    expect(mockState.queueTabStartupCommand).toHaveBeenCalledWith('tab-new', {
-      command: 'cd packages; bun run build; cd ..'
-    })
+    expect(mocks.queueTerminalQuickCommandForTab).toHaveBeenCalledWith('tab-new', command)
+    expect(mockState.queueTabStartupCommand).not.toHaveBeenCalled()
     expect(mockState.setRecentQuickCommandForGroup).toHaveBeenCalledWith('group-1', 'build')
+  })
+
+  it('preserves agent identity while running a raw Canvas command', () => {
+    runQuickCommandInNewTab({
+      command: {
+        id: 'canvas-agent',
+        label: 'Canvas Agent',
+        action: 'terminal-command',
+        command: 'opencode --continue',
+        appendEnter: true
+      },
+      worktreeId: 'wt-1',
+      launchAgent: 'opencode'
+    })
+
+    expect(mockState.createTab).toHaveBeenCalledWith('wt-1', undefined, undefined, {
+      launchAgent: 'opencode',
+      quickCommandLabel: 'Canvas Agent'
+    })
+    expect(mocks.queueTerminalQuickCommandForTab).toHaveBeenCalledWith(
+      'tab-new',
+      expect.objectContaining({ command: 'opencode --continue' })
+    )
   })
 
   it('keeps single-line quick commands unchanged', () => {
@@ -96,9 +127,10 @@ describe('runQuickCommandInNewTab', () => {
       groupId: 'group-1'
     })
 
-    expect(mockState.queueTabStartupCommand).toHaveBeenCalledWith('tab-new', {
-      command: 'git status'
-    })
+    expect(mocks.queueTerminalQuickCommandForTab).toHaveBeenCalledWith(
+      'tab-new',
+      expect.objectContaining({ command: 'git status' })
+    )
   })
 
   it('launches agent quick commands through the programmatic agent prompt path', () => {

@@ -47,7 +47,10 @@ describe('useTerminalFontZoom', () => {
     })
   })
 
-  function useMountedTerminalFontZoom(activeElement: HTMLElement): {
+  function useMountedTerminalFontZoom(
+    activeElement: HTMLElement,
+    terminalDisplayScale = 1
+  ): {
     terminal: { options: { fontSize?: number } }
     listener: (direction: 'in' | 'out' | 'reset') => void
   } {
@@ -65,7 +68,8 @@ describe('useTerminalFontZoom', () => {
         }
       } as never,
       paneFontSizesRef: { current: new Map() },
-      settingsRef: { current: { terminalFontSize: 14 } }
+      settingsRef: { current: { terminalFontSize: 14 } },
+      terminalDisplayScale
     })
     const listener = terminalZoomListeners.at(-1)
     expect(listener).toBeTypeOf('function')
@@ -92,6 +96,17 @@ describe('useTerminalFontZoom', () => {
 
     expect(terminal.options.fontSize).toBe(15)
     expect(mocks.safeFit).toHaveBeenCalledTimes(1)
+    expect(mocks.dispatchZoomLevelChanged).toHaveBeenCalledWith('terminal', 107)
+  })
+
+  it('keeps user font zoom proportional inside a scaled Canvas terminal', () => {
+    const helper = document.createElement('textarea')
+    helper.className = 'xterm-helper-textarea'
+    const { listener, terminal } = useMountedTerminalFontZoom(helper, 0.5)
+
+    listener('in')
+
+    expect(terminal.options.fontSize).toBe(7.5)
     expect(mocks.dispatchZoomLevelChanged).toHaveBeenCalledWith('terminal', 107)
   })
 

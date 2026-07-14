@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   recordTerminalUserInputForLeaf: vi.fn()
@@ -7,7 +7,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock('./terminal-input-activity', () => ({
   recordTerminalUserInputForLeaf: mocks.recordTerminalUserInputForLeaf
 }))
-import { sendTerminalQuickCommandToPane } from './terminal-quick-command-dispatch'
+import {
+  queueTerminalQuickCommandForTab,
+  registerTerminalQuickCommandTarget,
+  sendTerminalQuickCommandToPane
+} from './terminal-quick-command-dispatch'
 
 function createPane() {
   return {
@@ -132,5 +136,50 @@ describe('sendTerminalQuickCommandToPane', () => {
     expect(sendInput).not.toHaveBeenCalled()
     expect(focus).not.toHaveBeenCalled()
     expect(mocks.recordTerminalUserInputForLeaf).not.toHaveBeenCalled()
+  })
+})
+
+describe('deferred terminal quick-command dispatch', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('retries until the terminal transport and shell prompt are ready', () => {
+    const command = {
+      id: 'canvas-agent',
+      label: 'Canvas Agent',
+      action: 'terminal-command' as const,
+      command: 'opencode',
+      appendEnter: true
+    }
+    const target = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true)
+
+    queueTerminalQuickCommandForTab('tab-deferred', command)
+    const unregister = registerTerminalQuickCommandTarget('tab-deferred', target)
+    expect(target).toHaveBeenCalledOnce()
+
+    vi.advanceTimersByTime(50)
+    expect(target).toHaveBeenCalledTimes(2)
+    expect(target).toHaveBeenLastCalledWith(command)
+    unregister()
+  })
+
+  it('dispatches immediately when a ready target is already registered', () => {
+    const target = vi.fn(() => true)
+    const unregister = registerTerminalQuickCommandTarget('tab-ready', target)
+    const command = {
+      id: 'status',
+      label: 'Status',
+      action: 'terminal-command' as const,
+      command: 'git status',
+      appendEnter: true
+    }
+
+    queueTerminalQuickCommandForTab('tab-ready', command)
+    expect(target).toHaveBeenCalledWith(command)
+    unregister()
   })
 })

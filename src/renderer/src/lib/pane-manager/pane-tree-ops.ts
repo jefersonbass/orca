@@ -7,6 +7,7 @@ import type {
 } from './pane-manager-types'
 import { createDivider, disposeDivider } from './pane-divider'
 import { getFitOverrideForPty } from './mobile-fit-overrides'
+import { getCanvasTerminalFitLock } from './canvas-terminal-fit-lock'
 import { disposeWebgl, attachWebgl } from './pane-webgl-renderer'
 import {
   captureTerminalWriteScrollIntent,
@@ -89,6 +90,14 @@ export function safeFit(pane: ManagedPane): void {
           shouldRestoreScroll = true
         }
         pane.terminal.resize(override.cols, override.rows)
+      }
+      return
+    }
+
+    const canvasGrid = getCanvasTerminalFitLock(pane.container)
+    if (canvasGrid) {
+      if (pane.terminal.cols !== canvasGrid.cols || pane.terminal.rows !== canvasGrid.rows) {
+        pane.terminal.resize(canvasGrid.cols, canvasGrid.rows)
       }
       return
     }

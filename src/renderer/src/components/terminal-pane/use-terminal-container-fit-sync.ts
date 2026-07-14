@@ -2,19 +2,44 @@ import { useEffect } from 'react'
 import { SYNC_FIT_PANES_EVENT } from '@/constants/terminal'
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
 import { fitPanes } from './pane-helpers'
+import {
+  clearCanvasTerminalFitLock,
+  setCanvasTerminalFitLock
+} from '@/lib/pane-manager/canvas-terminal-fit-lock'
 
 type UseTerminalContainerFitSyncArgs = {
   isVisible: boolean
   isSyncFitEnabled: boolean
   managerRef: React.RefObject<PaneManager | null>
   containerRef: React.RefObject<HTMLDivElement | null>
+  terminalDisplayScaleRef?: React.RefObject<number>
+  logicalCanvasSizeRef?: React.RefObject<{ width: number; height: number } | null>
+  logicalGridLockRef?: React.RefObject<Map<string, { cols: number; rows: number }> | null>
+}
+
+function restoreLogicalGrid(
+  manager: PaneManager,
+  gridLock: ReadonlyMap<string, { cols: number; rows: number }>
+): void {
+  for (const pane of manager.getPanes()) {
+    const locked = gridLock.get(pane.leafId)
+    if (locked && (pane.terminal.cols !== locked.cols || pane.terminal.rows !== locked.rows)) {
+      pane.terminal.resize(locked.cols, locked.rows)
+    }
+    if (locked) {
+      setCanvasTerminalFitLock(pane.container, locked)
+    }
+  }
 }
 
 export function useTerminalContainerFitSync({
   isVisible,
   isSyncFitEnabled,
   managerRef,
-  containerRef
+  containerRef,
+  terminalDisplayScaleRef,
+  logicalCanvasSizeRef,
+  logicalGridLockRef
 }: UseTerminalContainerFitSyncArgs): void {
   // Why: sidebar open/close toggles dispatch SYNC_FIT_PANES_EVENT from a
   // useLayoutEffect (pre-paint, same frame as the width change) so the
@@ -30,13 +55,22 @@ export function useTerminalContainerFitSync({
       return
     }
     const onSyncFit = (): void => {
-      managerRef.current?.fitAllPanes()
+      const manager = managerRef.current
+      if (!manager) {
+        return
+      }
+      const gridLock = logicalGridLockRef?.current
+      if (gridLock) {
+        restoreLogicalGrid(manager, gridLock)
+      } else {
+        manager.fitAllPanes()
+      }
     }
     window.addEventListener(SYNC_FIT_PANES_EVENT, onSyncFit)
     return () => {
       window.removeEventListener(SYNC_FIT_PANES_EVENT, onSyncFit)
     }
-  }, [isSyncFitEnabled, managerRef])
+  }, [isSyncFitEnabled, logicalGridLockRef, managerRef])
 
   useEffect(() => {
     if (!isVisible) {
@@ -63,7 +97,41 @@ export function useTerminalContainerFitSync({
         timerId = null
         const manager = managerRef.current
         if (manager) {
-          fitPanes(manager)
+          const canvasNode = container.closest<HTMLElement>('.react-flow__node')
+          const displayScale = Math.max(0.1, terminalDisplayScaleRef?.current ?? 1)
+          const logicalSize = canvasNode
+            ? { width: canvasNode.offsetWidth, height: canvasNode.offsetHeight }
+            : {
+                width: container.clientWidth / displayScale,
+                height: container.clientHeight / displayScale
+              }
+          const previousLogicalSize = logicalCanvasSizeRef?.current
+          const gridLock = logicalGridLockRef?.current
+          const logicalSizeChanged =
+            previousLogicalSize !== null &&
+            previousLogicalSize !== undefined &&
+            (Math.abs(previousLogicalSize.width - logicalSize.width) > 2 ||
+              Math.abs(previousLogicalSize.height - logicalSize.height) > 2)
+
+          if (logicalCanvasSizeRef) {
+            logicalCanvasSizeRef.current = logicalSize
+          }
+          if (gridLock && !logicalSizeChanged) {
+            // React Flow zoom changes the transformed pixel size, but not the
+            // Canvas node's logical dimensions. Preserve xterm's grid so TUIs
+            // do not reflow merely because fractional cell metrics round.
+            restoreLogicalGrid(manager, gridLock)
+          } else {
+            if (logicalSizeChanged) {
+              if (logicalGridLockRef) {
+                logicalGridLockRef.current = null
+              }
+              for (const pane of manager.getPanes()) {
+                clearCanvasTerminalFitLock(pane.container)
+              }
+            }
+            fitPanes(manager)
+          }
         }
       }, RESIZE_DEBOUNCE_MS)
     })

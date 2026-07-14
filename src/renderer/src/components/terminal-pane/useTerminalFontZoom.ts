@@ -10,6 +10,7 @@ type FontZoomDeps = {
   managerRef: React.RefObject<PaneManager | null>
   paneFontSizesRef: React.RefObject<Map<number, number>>
   settingsRef: React.RefObject<{ terminalFontSize?: number } | null>
+  terminalDisplayScale?: number
 }
 
 export function useTerminalFontZoom({
@@ -17,7 +18,8 @@ export function useTerminalFontZoom({
   containerRef,
   managerRef,
   paneFontSizesRef,
-  settingsRef
+  settingsRef,
+  terminalDisplayScale = 1
 }: FontZoomDeps): void {
   useEffect(() => {
     if (!isActive) {
@@ -56,7 +58,7 @@ export function useTerminalFontZoom({
         paneFontSizesRef.current.set(pane.id, nextSize)
       }
 
-      pane.terminal.options.fontSize = nextSize
+      pane.terminal.options.fontSize = nextSize * terminalDisplayScale
       try {
         const state = captureScrollState(pane.terminal)
         safeFit(pane)
@@ -68,5 +70,5 @@ export function useTerminalFontZoom({
       const percent = Math.round((nextSize / globalSize) * 100)
       dispatchZoomLevelChanged('terminal', percent)
     })
-  }, [containerRef, isActive, managerRef, paneFontSizesRef, settingsRef])
+  }, [containerRef, isActive, managerRef, paneFontSizesRef, settingsRef, terminalDisplayScale])
 }
