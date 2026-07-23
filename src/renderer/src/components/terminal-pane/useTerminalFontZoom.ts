@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
 import { dispatchZoomLevelChanged } from '@/lib/zoom-events'
-import { captureScrollState, restoreScrollState, safeFit } from '@/lib/pane-manager/pane-tree-ops'
+import { safeFit } from '@/lib/pane-manager/pane-tree-ops'
 import { getPaneOwnedActiveHelperTextarea } from './regular-terminal-focus-ownership'
 
 type FontZoomDeps = {
