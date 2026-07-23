@@ -68,6 +68,10 @@ jobs:
       should_release: ${{ steps.tag.outputs.tag != '' || steps.version.outputs.recovered_tag != '' }}
       latest_published_rc_tag: ${{ steps.publish_drafts.outputs.latest_published_tag }}
     steps:
+      # Surfaces workflow_dispatch inputs as a table in the job summary
+      # (kind, ref, dry_run, version_suffix) so runs are easy to audit.
+      - uses: m-s-abeer/update-gha-summary-with-workflow-inputs@v1
+
       - name: Checkout ref
         uses: actions/checkout@v6
         with:
@@ -863,6 +867,20 @@ jobs:
           ORCA_DIAGNOSTICS_TOKEN_URL: https://www.onorca.dev/diagnostics/token
           ORCA_POSTHOG_WRITE_KEY: ${{ secrets.ORCA_POSTHOG_WRITE_KEY }}
 
+      - name: Gate runtime file-watcher process isolation
+        if: runner.os == 'Linux'
+        run: |
+          # Why: #8212 is a native-process crash contract. Prove both the Node
+          # host and the exact Electron runtime survive SIGSEGV before packaging.
+          node config/scripts/runtime-file-watcher-fault-harness.mjs
+          ELECTRON_RUN_AS_NODE=1 pnpm exec electron config/scripts/runtime-file-watcher-fault-harness.mjs
+
+      - name: Gate SSH relay watcher process isolation
+        run: |
+          # Why: the remote native watcher shares a daemon with live PTYs.
+          # Kill only its child and require both PTY and watch recovery before packaging.
+          node config/scripts/relay-watcher-fault-harness.mjs
+
       - name: Publish release artifacts (Linux)
         if: matrix.platform == 'linux-x64' || matrix.platform == 'linux-arm64'
         uses: nick-fields/retry@v4
@@ -1312,7 +1330,8 @@ jobs:
           }
 
           Copy-Item -Path $signedInstaller.FullName -Destination 'dist/orca-windows-setup.exe' -Force
-          & 'node_modules/app-builder-bin/win/x64/app-builder.exe' blockmap --input 'dist/orca-windows-setup.exe' --output 'dist/orca-windows-setup.exe.blockmap'
+          node config/scripts/generate-windows-blockmap.mjs 'dist/orca-windows-setup.exe' 'dist/orca-windows-setup.exe.blockmap'
+          if ($LASTEXITCODE -ne 0) { throw "blockmap generation failed with exit code $LASTEXITCODE" }
 
           $installer = Get-Item 'dist/orca-windows-setup.exe'
           $blockmap = Get-Item 'dist/orca-windows-setup.exe.blockmap'
