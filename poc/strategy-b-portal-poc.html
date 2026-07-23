@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Strategy B — Hidden Host + Portal PoC</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --border: #533483;
+    --text: #e8e8e8;
+    --accent: #e94560;
+    --success: #2ecc71;
+    --warning: #f39c12;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  /* ── Hidden Host (always exists, not visible) ── */
+  #hidden-host {
+    position: fixed;
+    left: -9999px;
+    top: -9999px;
+    width: 800px;
+    height: 600px;
+    pointer-events: none;
+    opacity: 0;
+  }
+  #hidden-host .terminal-container {
+    width: 100%;
+    height: 100%;
+    margin-bottom: 12px;
+  }
+
+  /* ── Toolbar ── */
+  #toolbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    height: 48px;
+  }
+  #toolbar button {
+    background: #0f3460; color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 12px; cursor: pointer; font-size: 13px;
+  }
+  #toolbar .spacer { flex: 1; }
+  #toolbar .metric { font-size: 12px; color: #888; }
+  #toolbar select {
+    background: #0f3460; color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 8px; font-size: 13px;
+  }
+
+  /* ── Canvas Grid ── */
+  #canvas-container {
+    width: 100vw;
+    height: calc(100vh - 48px);
+    position: relative;
+    overflow: hidden;
+    background: #0d1117;
+    background-image: radial-gradient(circle, #1a1a3e 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  /* ── Canvas Node (portal target) ── */
+  .canvas-node {
+    position: absolute;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    overflow: hidden;
+    cursor: default;
+    transition: border-color 0.15s;
+  }
+  .canvas-node.active {
+    border-color: var(--success);
+  }
+  .canvas-node .node-header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 10px;
+    background: rgba(0,0,0,0.2);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: grab;
+  }
+  .canvas-node .node-header:active { cursor: grabbing; }
+  .canvas-node .node-body {
+    width: 100%;
+    height: calc(100% - 32px);
+    position: relative;
+  }
+  .canvas-node .node-body .xterm-container {
+    width: 100%;
+    height: 100%;
+  }
+  .canvas-node .portal-overlay {
+    width: 100%;
+    height: 100%;
+  }
+  .canvas-node .resize-handle {
+    position: absolute; bottom: 0; right: 0;
+    width: 14px; height: 14px;
+    cursor: nwse-resize;
+    background: linear-gradient(135deg, transparent 50%, var(--border) 50%);
+  }
+
+  /* ── Placeholder (Strategy C comparison) ── */
+  .canvas-node.placeholder .node-body {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; color: #666;
+  }
+
+  /* ── Metrics overlay ── */
+  #metrics {
+    position: fixed; bottom: 8px; left: 8px;
+    background: rgba(0,0,0,0.8);
+    padding: 6px 10px; border-radius: 6px;
+    font-family: monospace; font-size: 11px;
+    color: var(--success);
+    pointer-events: none;
+    z-index: 9999;
+    line-height: 1.6;
+  }
+
+  /* ── xterm overrides ── */
+  .xterm { height: 100%; padding: 4px; }
+  .xterm-viewport { scrollbar-width: thin; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button onclick="toggleStrategy()">Toggle Strategy</button>
+  <button onclick="addNode()">+ Terminal Node</button>
+  <button onclick="removeNode()">− Remove Last</button>
+  <span class="spacer"></span>
+  <span class="metric" id="strategy-label">Strategy: B (Portal)</span>
+  <span class="metric" id="node-count">Nodes: 0</span>
+  <select id="view-select" onchange="switchView(this.value)">
+    <option value="canvas">Canvas View</option>
+    <option value="workbench">Workbench (hidden host)</option>
+  </select>
+</div>
+
+<div id="canvas-container">
+  <!-- xterm terminals render here through portal targets -->
+</div>
+
+<div id="hidden-host">
+  <div id="terminal-host-0" class="terminal-container"></div>
+  <div id="terminal-host-1" class="terminal-container"></div>
+  <div id="terminal-host-2" class="terminal-container"></div>
+  <div id="terminal-host-3" class="terminal-container"></div>
+  <div id="terminal-host-4" class="terminal-container"></div>
+</div>
+
+<div id="metrics">
+FPS: -- | Strategy: B | Terminals: 0 active, 0 dormant<br>
+Mounts: 0 | Selections: 0 | Scrollback: — | Mode: canvas
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.5.0/lib/xterm.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/xterm@5.5.0/css/xterm.css" rel="stylesheet">
+
+<script>
+// ── State ──
+let terminals = [];
+let termCounter = 0;
+let mountCounter = 0;
+let currentStrategy = 'B';  // B = portal, C = single-active, A = snapshot
+let viewMode = 'canvas';
+let selectionCount = 0;
+let dragNode = null;
+
+// ── FPS ──
+let lastFrame = performance.now();
+let frames = 0;
+function updateFPS() {
+  const now = performance.now();
+  frames++;
+  if (now - lastFrame >= 1000) {
+    document.querySelector('#metrics').innerHTML =
+      `FPS: ${frames} | Strategy: ${currentStrategy} | Terminals: ${terminals.length} active, 0 dormant<br>` +
+      `Mounts: ${mountCounter} | Selections: ${selectionCount} | Mode: ${viewMode}`;
+    frames = 0; lastFrame = now;
+  }
+  requestAnimationFrame(updateFPS);
+}
+requestAnimationFrame(updateFPS);
+
+// ── Terminal Factory (Strategy B: xterm lives in hidden host) ──
+function createTerminal(id, label) {
+  termCounter++;
+  const hostId = id % 5;
+  const hostEl = document.getElementById(`terminal-host-${hostId}`);
+
+  // Create xterm in hidden host
+  const term = new Terminal({
+    cursorBlink: true,
+    fontSize: 13,
+    theme: { background: '#1a1a2e', foreground: '#e8e8e8', cursor: '#e94560' },
+  });
+  const fitAddon = new window.FitAddon ? new window.FitAddon() : null;
+  if (fitAddon) term.loadAddon(fitAddon);
+
+  // Open in hidden host
+  const container = document.createElement('div');
+  container.className = 'xterm-container';
+  container.id = `term-${id}-container`;
+  hostEl.appendChild(container);
+  term.open(container);
+  mountCounter++;
+
+  if (fitAddon) {
+    try { fitAddon.fit(); } catch(e) {}
+  }
+
+  // Write welcome
+  term.write(`\x1b[32mTerminal #${id}\x1b[0m [${label}]\r\n\x1b[36m$\x1b[0m `);
+
+  // Track selection
+  term.onSelectionChange(() => { selectionCount++; });
+
+  // ── Create Canvas Node (portal target) ──
+  const nodeWidth = 480 + Math.random() * 100;
+  const nodeHeight = 320 + Math.random() * 80;
+  const x = 40 + Math.random() * 500;
+  const y = 60 + Math.random() * 300;
+
+  const node = document.createElement('div');
+  node.className = 'canvas-node active';
+  node.id = `node-${id}`;
+  node.style.left = `${x}px`;
+  node.style.top = `${y}px`;
+  node.style.width = `${nodeWidth}px`;
+  node.style.height = `${nodeHeight}px`;
+  node.dataset.termId = id;
+
+  // Header
+  const header = document.createElement('div');
+  header.className = 'node-header';
+  header.innerHTML = `<span style="color:var(--success)">●</span> ${label}`;
+  node.appendChild(header);
+
+  // Portal target body — xterm renders here
+  const body = document.createElement('div');
+  body.className = 'node-body';
+  body.appendChild(container);  // MOVING the xterm container to canvas node!
+
+  // Resize handle
+  const handle = document.createElement('div');
+  handle.className = 'resize-handle';
+  body.appendChild(handle);
+  node.appendChild(body);
+
+  // Drag
+  header.addEventListener('pointerdown', (e) => {
+    dragNode = { node, startX: e.clientX, startY: e.clientY, origLeft: parseInt(node.style.left), origTop: parseInt(node.style.top) };
+    node.setPointerCapture(e.pointerId);
+  });
+  document.addEventListener('pointermove', (e) => {
+    if (!dragNode) return;
+    const dx = e.clientX - dragNode.startX;
+    const dy = e.clientY - dragNode.startY;
+    dragNode.node.style.left = `${dragNode.origLeft + dx}px`;
+    dragNode.node.style.top = `${dragNode.origTop + dy}px`;
+  });
+  document.addEventListener('pointerup', () => { dragNode = null; });
+
+  // Resize
+  handle.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    const startX = e.clientX, startY = e.clientY;
+    const startW = parseInt(node.style.width), startH = parseInt(node.style.height);
+    const onMove = (ev) => {
+      node.style.width = `${Math.max(200, startW + ev.clientX - startX)}px`;
+      node.style.height = `${Math.max(120, startH + ev.clientY - startY)}px`;
+      if (fitAddon) setTimeout(() => { try { fitAddon.fit(); } catch(e) {} }, 50);
+    };
+    const onUp = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  });
+
+  document.getElementById('canvas-container').appendChild(node);
+
+  const t = { id, term, fitAddon, container, hostEl, node, label };
+  terminals.push(t);
+  updateCounts();
+  return t;
+}
+
+// ── Strategy Toggle (B ⇄ C: shows portal vs single-active comparison) ──
+function toggleStrategy() {
+  if (currentStrategy === 'B') {
+    currentStrategy = 'C';
+    // Strategy C: destroy all xterms, show placeholders
+    terminals.forEach(t => {
+      t.term.dispose();
+      t.node.querySelector('.node-body').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;font-size:12px">Click to activate</div>';
+      t.node.classList.remove('active');
+      t.node.classList.add('placeholder');
+    });
+  } else {
+    currentStrategy = 'B';
+    // Strategy B: recreate xterms in place (simulating portal reattach)
+    terminals.forEach((t, idx) => {
+      const body = t.node.querySelector('.node-body');
+      body.innerHTML = '';
+      const container = document.createElement('div');
+      container.className = 'xterm-container';
+      body.appendChild(container);
+
+      const term = new Terminal({
+        cursorBlink: true, fontSize: 13,
+        theme: { background: '#1a1a2e', foreground: '#e8e8e8', cursor: '#e94560' },
+      });
+      const fitAddon = new window.FitAddon ? new window.FitAddon() : null;
+      if (fitAddon) term.loadAddon(fitAddon);
+      term.open(container);
+      mountCounter++;
+      term.write(`\x1b[32mTerminal #${t.id}\x1b[0m [recreated]\r\n\x1b[36m$\x1b[0m `);
+      t.term = term;
+      t.fitAddon = fitAddon;
+      t.node.classList.remove('placeholder');
+      t.node.classList.add('active');
+      if (fitAddon) setTimeout(() => { try { fitAddon.fit(); } catch(e) {} }, 100);
+    });
+  }
+  document.getElementById('strategy-label').textContent = `Strategy: ${currentStrategy} (${currentStrategy === 'B' ? 'Portal' : 'Single Active'})`;
+}
+
+// ── Add/Remove ──
+function addNode() {
+  const names = ['Claude', 'Codex', 'Gemini', 'zsh', 'bash', 'ssh:dev', 'ssh:prod', 'cursor'];
+  const name = names[Math.floor(Math.random() * names.length)];
+  createTerminal(terminals.length + 1, `${name}-${terminals.length + 1}`);
+}
+
+function removeNode() {
+  const t = terminals.pop();
+  if (!t) return;
+  t.term.dispose();
+  t.node.remove();
+  updateCounts();
+}
+
+// ── View Switch ──
+function switchView(view) {
+  viewMode = view;
+  const canvas = document.getElementById('canvas-container');
+  const host = document.getElementById('hidden-host');
+  if (view === 'workbench') {
+    canvas.style.display = 'none';
+    host.style.opacity = '1';
+    host.style.pointerEvents = 'auto';
+    host.style.left = '0';
+    host.style.top = '48px';
+  } else {
+    canvas.style.display = 'block';
+    host.style.opacity = '0';
+    host.style.pointerEvents = 'none';
+    host.style.left = '-9999px';
+    host.style.top = '-9999px';
+  }
+}
+
+// ── Output Simulation ──
+let outputInterval = null;
+function startSimulatedOutput() {
+  if (outputInterval) clearInterval(outputInterval);
+  outputInterval = setInterval(() => {
+    terminals.forEach(t => {
+      if (t && t.term && !t.term.disposed) {
+        const lines = ['[INFO] Processing...\r\n', '[OK] Done\r\n', '[WARN] Retrying...\r\n', `tick ${Date.now() % 1000}\r\n`];
+        t.term.write(lines[Math.floor(Math.random() * lines.length)]);
+      }
+    });
+  }, 2000);
+}
+startSimulatedOutput();
+
+function updateCounts() {
+  document.getElementById('node-count').textContent = `Nodes: ${terminals.length}`;
+}
+
+// ── Init ──
+for (let i = 0; i < 3; i++) {
+  const names = ['Claude Code', 'Codex Agent', 'zsh'];
+  createTerminal(i + 1, names[i]);
+}
+
+console.log('=== Strategy B Portal PoC Loaded ===');
+console.log('Commands: addNode(), removeNode(), toggleStrategy(), switchView("canvas"/"workbench")');
+</script>
+</body>
+</html>

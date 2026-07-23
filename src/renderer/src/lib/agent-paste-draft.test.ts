@@ -351,7 +351,7 @@ describe('pasteDraftWhenAgentReady', () => {
       'pty-1',
       PASTED_ISSUE_URL
     )
-    await vi.advanceTimersByTimeAsync(49)
+    await vi.advanceTimersByTimeAsync(99)
     expect(testState.sendRuntimePtyInputVerified).toHaveBeenCalledTimes(1)
     await vi.advanceTimersByTimeAsync(1)
     await expect(promise).resolves.toBe(true)
@@ -532,7 +532,7 @@ describe('pasteDraftWhenAgentReady', () => {
     )
 
     await flushMicrotasks()
-    await vi.advanceTimersByTimeAsync(49)
+    await vi.advanceTimersByTimeAsync(99)
     expect(testState.sendRuntimePtyInputVerified).toHaveBeenCalledTimes(1)
     await vi.advanceTimersByTimeAsync(1)
 
@@ -558,7 +558,7 @@ describe('pasteDraftWhenAgentReady', () => {
     })
 
     await flushMicrotasks()
-    await vi.advanceTimersByTimeAsync(50)
+    await vi.advanceTimersByTimeAsync(100)
 
     await expect(promise).resolves.toBe(true)
     expect(testState.sendRuntimePtyInputVerified).toHaveBeenNthCalledWith(
@@ -599,10 +599,25 @@ describe('pasteDraftWhenAgentReady', () => {
       expect((call[2] as string).length).toBeLessThanOrEqual(AGENT_DRAFT_PASTE_CHUNK_MAX_BYTES)
     }
 
-    await vi.advanceTimersByTimeAsync(50)
+    await vi.advanceTimersByTimeAsync(100)
 
     await expect(promise).resolves.toBe(true)
     expect(testState.sendRuntimePtyInputVerified).toHaveBeenLastCalledWith({}, 'pty-1', '\r')
+  })
+
+  it('normalizes multiline running-agent drafts like terminal paste', async () => {
+    const promise = sendBracketedPasteToRunningAgent({
+      ptyId: 'pty-1',
+      content: 'line one\r\nline two\nline three'
+    })
+
+    expect(testState.sendRuntimePtyInputVerified).toHaveBeenCalledWith(
+      {},
+      'pty-1',
+      '\x1b[200~line one\rline two\rline three\x1b[201~'
+    )
+    await vi.advanceTimersByTimeAsync(50)
+    await expect(promise).resolves.toBe(true)
   })
 
   it('closes bracketed paste and does not submit when a chunked draft write is rejected', async () => {
@@ -636,6 +651,13 @@ describe('pasteDraftWhenAgentReady', () => {
     expect(chunks.at(-1)).toBe('\x1b[201~')
     expect(chunks.slice(1, -1).join('')).toBe('before␛[201~after😀')
     expect(chunks.slice(1, -1).join('')).not.toContain('\x1b[201~')
+  })
+
+  it('normalizes agent draft line endings before a CRLF chunk boundary', () => {
+    const chunks = chunkAgentDraftPasteContent('abc\r\ndef\nghi', 4)
+
+    expect(chunks).toEqual(['\x1b[200~', 'abc\r', 'def\r', 'ghi', '\x1b[201~'])
+    expect(chunks.join('')).not.toContain('\n')
   })
 
   it('chunks escape-heavy agent draft paste without per-character string sanitizer scans', () => {

@@ -8,6 +8,7 @@ import {
 } from '@/constants/terminal'
 import type { PaneManager } from '@/lib/pane-manager/pane-manager'
 import type { PtyTransport } from './pty-transport'
+import type { IDisposable } from '@xterm/xterm'
 import { handleTerminalFileDrop } from './terminal-drop-handler'
 import { handleFocusTerminalPaneDetail } from './focus-terminal-pane-event'
 import { surfaceStaleAgentRow } from './stale-agent-row'
@@ -38,8 +39,12 @@ type UseTerminalPaneGlobalEffectsArgs = {
   managerRef: React.RefObject<PaneManager | null>
   containerRef: React.RefObject<HTMLDivElement | null>
   paneTransportsRef: React.RefObject<Map<number, PtyTransport>>
+  panePtyBindingsRef?: React.RefObject<Map<number, IDisposable>>
   isActiveRef: React.RefObject<boolean>
   isVisibleRef: React.RefObject<boolean>
+  terminalDisplayScaleRef?: React.RefObject<number>
+  logicalCanvasSizeRef?: React.RefObject<{ width: number; height: number } | null>
+  logicalGridLockRef?: React.RefObject<Map<string, { cols: number; rows: number }> | null>
   toggleExpandPane: (paneId: number) => void
 }
 
@@ -70,18 +75,20 @@ export function useTerminalPaneGlobalEffects({
   managerRef,
   containerRef,
   paneTransportsRef,
+  panePtyBindingsRef,
   isActiveRef,
   isVisibleRef,
+  terminalDisplayScaleRef,
+  logicalCanvasSizeRef,
+  logicalGridLockRef,
   toggleExpandPane
 }: UseTerminalPaneGlobalEffectsArgs): void {
   const worktreeIdRef = useRef(worktreeId)
   worktreeIdRef.current = worktreeId
   const cwdRef = useRef(cwd)
   cwdRef.current = cwd
-  // Starts true so the first render with isVisible=false triggers a
-  // suspendRendering(). Background worktrees that mount hidden would
-  // otherwise leak WebGL contexts — openTerminal() unconditionally creates
-  // one — and exhaust Chromium's ~8-context budget across worktrees.
+  // Starts true so first isVisible=false render triggers suspendRendering().
+  // Background worktrees mounted hidden leak WebGL contexts via openTerminal().
   const wasVisibleRef = useRef(true)
   const wasWorktreeActiveRef = useRef(isWorktreeActive)
   const hasCompletedVisibleResumeRef = useRef(false)
@@ -114,13 +121,17 @@ export function useTerminalPaneGlobalEffects({
     isVisible: rendererVisible,
     isSyncFitEnabled,
     managerRef,
-    containerRef
+    containerRef,
+    terminalDisplayScaleRef,
+    logicalCanvasSizeRef,
+    logicalGridLockRef
   })
   useTerminalWindowWakeRecovery({
     isVisible: rendererVisible,
     managerRef,
     isActiveRef,
-    isVisibleRef
+    isVisibleRef,
+    panePtyBindingsRef
   })
 
   useEffect(() => {
@@ -185,9 +196,8 @@ export function useTerminalPaneGlobalEffects({
     if (!ptyId || ptyId.startsWith('remote:')) {
       return
     }
-    // Why: main uses this as a scheduler hint only, so the foreground pane's
-    // renderer output gets first chance at the bounded ACK reserve. The cleanup
-    // reports the old PTY inactive before the effect re-runs for a rebind.
+    // Why: scheduler hint so the foreground pane's renderer output gets first
+    // chance at the bounded ACK reserve before the effect re-runs for a rebind.
     window.api.pty.setActiveRendererPty?.(ptyId, true)
     return () => window.api.pty.setActiveRendererPty?.(ptyId, false)
   }, [isActive, isVisible, isWorktreeActive, activeLeafPtyId])
